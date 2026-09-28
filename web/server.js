@@ -20,6 +20,7 @@ app.use(express.json({ limit: "20mb" }));
 const sessions = new Map();
 const oauthStates = new Map();
 const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
+const GEMINI_REQUIRED_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
 
 function cookieToken(req) {
@@ -277,10 +278,12 @@ app.get("/auth/google/callback", async function(req, res) {
     const user = await userRes.json();
     if (!userRes.ok) throw new Error("Google user info failed");
     const sessionId = crypto.randomBytes(32).toString("hex");
+    const grantedScopes = String(tokens.scope || "").split(/\s+/).filter(Boolean);
     sessions.set(sessionId, {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || "",
       expiresAt: Date.now() + Number(tokens.expires_in || 3600) * 1000,
+      grantedScopes,
       user: { name: user.name || user.email || "Google user", email: user.email || "", picture: user.picture || "" }
     });
     setSessionCookie(res, sessionId);
@@ -294,7 +297,11 @@ app.get("/auth/google/callback", async function(req, res) {
 app.get("/api/auth/me", function(req, res) {
   const session = authSession(req);
   if (!session) return res.json({ authenticated: false });
-  res.json({ authenticated: true, user: session.user });
+  res.json({
+    authenticated: true,
+    user: session.user,
+    geminiScopeGranted: Array.isArray(session.grantedScopes) && session.grantedScopes.includes(GEMINI_REQUIRED_SCOPE)
+  });
 });
 
 app.post("/api/auth/logout", function(req, res) {
@@ -325,6 +332,11 @@ async function refreshGoogleSession(session) {
 
 async function geminiFetch(session, url, options) {
   await refreshGoogleSession(session);
+  if (!Array.isArray(session.grantedScopes) || !session.grantedScopes.includes(GEMINI_REQUIRED_SCOPE)) {
+    const error = new Error("Google authorization is missing the Gemini API cloud-platform scope. Please sign in with Google again and grant the requested Gemini permission.");
+    error.code = "INSUFFICIENT_SCOPE";
+    throw error;
+  }
   const headers = Object.assign({}, options && options.headers || {}, {
     Authorization: "Bearer " + session.accessToken,
     "x-goog-user-project": process.env.GOOGLE_CLOUD_PROJECT
@@ -413,6 +425,14 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
     res.json(verified);
   } catch (error) {
     console.error(error);
+    if (error && (error.code === "INSUFFICIENT_SCOPE" || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(String(error.message || "")))) {
+      const token = cookieToken(req);
+      if (token) sessions.delete(token);
+      clearSessionCookie(res);
+      return res.status(401).json({
+        error: "הרשאת Gemini בחשבון Google חסרה או ישנה. התנתק והתחבר מחדש עם Google כדי לאשר את הרשאת Gemini."
+      });
+    }
     res.status(500).json({ error: error && error.message ? "Gemini: " + error.message : "ניתוח השיר נכשל" });
   } finally {
     try { await fs.unlink(req.file.path); } catch {}
