@@ -14,7 +14,31 @@ await fs.mkdir(uploadDir, { recursive: true });
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "20mb" }));
+
+const sessions = new Map();
+const oauthStates = new Map();
+const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
+const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
+
+function cookieToken(req) {
+  const raw = String(req.headers.cookie || "");
+  const m = raw.match(/(?:^|;\\s*)chord_session=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+function authSession(req) { return sessions.get(cookieToken(req)) || null; }
+function setSessionCookie(res, token) {
+  res.setHeader("Set-Cookie", "chord_session=" + encodeURIComponent(token) + "; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000");
+}
+function clearSessionCookie(res) { res.setHeader("Set-Cookie", "chord_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"); }
+function requireGoogleOAuth(res) {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_CLOUD_PROJECT) {
+    res.status(503).json({ error: "Google OAuth עדיין לא הוגדר בשרת. חסרים GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET או GOOGLE_CLOUD_PROJECT." });
+    return false;
+  }
+  return true;
+}
+
 
 const upload = multer({
   dest: uploadDir,
