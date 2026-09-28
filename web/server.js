@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { GoogleGenAI } from "@google/genai";
 import { parseFile } from "music-metadata";
+import Replicate from "replicate";
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from "docx";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -961,6 +962,34 @@ function groupWordsForWordExport(analysis, shift, mode) {
 
   return groups;
 }
+
+app.post("/api/separate-vocals", upload.single("audio"), async function(req, res) {
+  if (!process.env.REPLICATE_API_TOKEN) {
+    if (req.file) { try { await fs.unlink(req.file.path); } catch {} }
+    return res.status(503).json({ error: "מערכת הפרדת הקול הוכנה, אך חסר בשרת מפתח Replicate (REPLICATE_API_TOKEN). יש להגדיר אותו בהגדרות Render." });
+  }
+  if (!req.file) return res.status(400).json({ error: "לא התקבל קובץ אודיו להפרדה." });
+  try {
+    const stat = await fs.stat(req.file.path);
+    if (!stat.size) return res.status(400).json({ error: "קובץ האודיו ריק." });
+    if (stat.size > 200 * 1024 * 1024) return res.status(413).json({ error: "הקובץ גדול מדי להפרדת קול (מקסימום 200MB)." });
+    const bytes = await fs.readFile(req.file.path);
+    const audioFile = new File([bytes], path.basename(req.file.originalname || "song-audio"), { type: req.file.mimetype || "audio/mpeg" });
+    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+    const output = await replicate.run(
+      "cjwbw/demucs:25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",
+      { input: { audio: audioFile, stem: "vocals", model_name: "htdemucs_ft", shifts: 2, overlap: 0.25, clip_mode: "rescale", output_format: "mp3", mp3_bitrate: 320 } }
+    );
+    const vocalsUrl = output && (output.vocals || output["vocals"]);
+    if (!vocalsUrl || typeof vocalsUrl !== "string") throw new Error("מודל ההפרדה לא החזיר קובץ קול זמר תקין.");
+    res.json({ vocalsUrl: vocalsUrl, model: "Demucs htdemucs_ft" });
+  } catch (error) {
+    console.error("Vocal separation failed", String(error && error.stack || error));
+    res.status(502).json({ error: "הפרדת הקול נכשלה: " + String(error && error.message || "שגיאה בשירות ההפרדה").slice(0, 300) });
+  } finally {
+    try { await fs.unlink(req.file.path); } catch {}
+  }
+});
 
 app.post("/api/export/docx", async function(req, res) {
   try {
