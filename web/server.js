@@ -480,6 +480,8 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
     error.geminiStatus = response.status;
     error.geminiCode = data.error && data.error.status || "";
     error.geminiApiCode = data.error && data.error.code || null;
+    const retryAfter = Number(response.headers.get("retry-after"));
+    error.retryAfterSeconds = Number.isFinite(retryAfter) ? retryAfter : 0;
     throw error;
   }
   const text = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
