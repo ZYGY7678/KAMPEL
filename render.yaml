@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: chord-studio
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: web
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
