@@ -30,30 +30,38 @@ function logOperation(id, stage, message, level) {
 }
 const sessions = new Map();
 const oauthStates = new Map();
-const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
-const GEMINI_REQUIRED_SCOPES = [
-  "https://www.googleapis.com/auth/cloud-platform",
-  "https://www.googleapis.com/auth/generative-language.retriever"
-];
+const usageReservations = new Map();
+let usageStateCache = null;
+let usageStateLoadPromise = null;
+let usageWriteQueue = Promise.resolve();
+const OAUTH_SCOPES = "openid email profile";
 const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
-
-function cookieToken(req) {
-  const raw = String(req.headers.cookie || "");
-  const m = raw.match(/(?:^|;\s*)chord_session=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : "";
-}
-function authSession(req) { return sessions.get(cookieToken(req)) || null; }
-function setSessionCookie(res, token) {
-  res.setHeader("Set-Cookie", "chord_session=" + encodeURIComponent(token) + "; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000");
-}
-function clearSessionCookie(res) { res.setHeader("Set-Cookie", "chord_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"); }
-function requireGoogleOAuth(res) {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_CLOUD_PROJECT) {
-    res.status(503).json({ error: "Google OAuth עדיין לא הוגדר בשרת. חסרים GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET או GOOGLE_CLOUD_PROJECT." });
-    return false;
-  }
-  return true;
-}
+const APP_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Jerusalem";
+const DAILY_SONG_LIMIT = 1;
+const PREMIUM_AMOUNT = 1500;
+const PREMIUM_CURRENCY = "ils";
+const PREMIUM_PRODUCT_NAME = "Chord Studio Premium";
+const USAGE_STATE_FILE = process.env.USAGE_STATE_FILE || path.join(uploadDir, "usage-state.json");
+function cookieToken(req){const raw=String(req.headers.cookie||""),m=raw.match(/(?:^|;\s*)chord_session=([^;]+)/);return m?decodeURIComponent(m[1]):"";}
+function authSession(req){return sessions.get(cookieToken(req))||null;}
+function setSessionCookie(res,token){res.setHeader("Set-Cookie","chord_session="+encodeURIComponent(token)+"; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000");}
+function clearSessionCookie(res){res.setHeader("Set-Cookie","chord_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0");}
+function requireGoogleOAuth(res){if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET){res.status(503).json({error:"Google OAuth עדיין לא הוגדר בשרת. חסרים GOOGLE_CLIENT_ID או GOOGLE_CLIENT_SECRET."});return false;}return true;}
+function normalizeEmail(email){return String(email||"").trim().toLowerCase();}
+function accountIdForUser(user){const stable=String(user&&user.id||normalizeEmail(user&&user.email));return crypto.createHash("sha256").update("chord-studio-account:"+stable).digest("hex");}
+function todayKey(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:APP_TIMEZONE,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()),map={};for(const part of parts)if(part.type!=="literal")map[part.type]=part.value;return map.year+"-"+map.month+"-"+map.day;}
+function usageReservationKey(id,date){return String(id)+"|"+String(date);}
+async function withUsageWriteLock(fn){const p=usageWriteQueue.then(fn,fn);usageWriteQueue=p.catch(function(){});return p;}
+async function loadUsageState(){if(usageStateCache)return usageStateCache;if(usageStateLoadPromise)return usageStateLoadPromise;usageStateLoadPromise=(async function(){try{const raw=await fs.readFile(USAGE_STATE_FILE,"utf8"),parsed=JSON.parse(raw);usageStateCache=parsed&&typeof parsed==="object"?parsed:{users:{}};}catch{usageStateCache={users:{}};}if(!usageStateCache.users||typeof usageStateCache.users!=="object")usageStateCache.users={};usageStateLoadPromise=null;return usageStateCache;})();return usageStateLoadPromise;}
+async function saveUsageState(){const state=usageStateCache||{users:{}},dir=path.dirname(USAGE_STATE_FILE),tmp=USAGE_STATE_FILE+".tmp-"+process.pid;await fs.mkdir(dir,{recursive:true});await fs.writeFile(tmp,JSON.stringify(state),"utf8");await fs.rename(tmp,USAGE_STATE_FILE);}
+async function getDailyUsage(id){return withUsageWriteLock(async function(){const state=await loadUsageState(),date=todayKey(),entry=state.users[id],used=entry&&entry.date===date?Math.max(0,Number(entry.count)||0):0,res=usageReservations.has(usageReservationKey(id,date));return{date:date,used:used,remaining:Math.max(0,DAILY_SONG_LIMIT-used-(res?1:0)),reserved:res};});}
+async function reserveDailyUsage(id){return withUsageWriteLock(async function(){const date=todayKey(),key=usageReservationKey(id,date);if(usageReservations.has(key))return{allowed:false,date:date,reason:"pending"};const state=await loadUsageState(),entry=state.users[id],used=entry&&entry.date===date?Math.max(0,Number(entry.count)||0):0;if(used>=DAILY_SONG_LIMIT)return{allowed:false,date:date,reason:"limit"};usageReservations.set(key,Date.now());return{allowed:true,date:date,remaining:Math.max(0,DAILY_SONG_LIMIT-used-1),reservationKey:key};});}
+async function commitDailyUsage(id,date){return withUsageWriteLock(async function(){const state=await loadUsageState(),cur=state.users[id],count=cur&&cur.date===date?Math.max(0,Number(cur.count)||0):0;state.users[id]={date:date,count:Math.min(DAILY_SONG_LIMIT,count+1)};await saveUsageState();usageReservations.delete(usageReservationKey(id,date));});}
+function releaseDailyUsage(key){if(key)usageReservations.delete(key);}
+async function stripeRequest(endpoint,method,params){if(!process.env.STRIPE_SECRET_KEY){const e=new Error("Stripe עדיין לא הוגדר בשרת.");e.code="STRIPE_NOT_CONFIGURED";throw e;}let url="https://api.stripe.com"+endpoint;const headers={Authorization:"Bearer "+process.env.STRIPE_SECRET_KEY};let body;if(method==="GET"){const q=params?new URLSearchParams(params).toString():"";if(q)url+="?"+q;}else if(params){headers["Content-Type"]="application/x-www-form-urlencoded";body=new URLSearchParams(params).toString();}const resp=await fetch(url,{method:method||"GET",headers:headers,body:body}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"Stripe request failed");e.stripeStatus=resp.status;throw e;}return data;}
+async function stripeHasPaidPremium(id){if(!process.env.STRIPE_SECRET_KEY)return false;const safe=String(id).replace(/"/g,'\"'),query='metadata["chord_studio_premium"]:"1" AND metadata["account_id"]:"'+safe+'" AND status:"succeeded" AND currency:"'+PREMIUM_CURRENCY+'" AND amount:'+PREMIUM_AMOUNT,data=await stripeRequest("/v1/payment_intents/search","GET",{query:query,limit:"1"});return Boolean(data&&Array.isArray(data.data)&&data.data.some(function(item){return item&&item.status==="succeeded"&&Number(item.amount)===PREMIUM_AMOUNT&&String(item.currency||"").toLowerCase()===PREMIUM_CURRENCY&&item.metadata&&item.metadata.chord_studio_premium==="1"&&item.metadata.account_id===id;}));}
+async function isPremiumSession(session){if(!session)return false;if(session.premium===true)return true;if(!process.env.STRIPE_SECRET_KEY)return false;if(session.premiumCheckedAt&&Date.now()-session.premiumCheckedAt<30000)return Boolean(session.premium);try{session.premium=await stripeHasPaidPremium(accountIdForUser(session.user));}catch(e){console.error("Stripe premium check failed",String(e&&e.message||e));session.premium=false;}session.premiumCheckedAt=Date.now();return Boolean(session.premium);}
+async function geminiApiKeyPreflight(key){const resp=await fetch("https://generativelanguage.googleapis.com/v1beta/models?key="+encodeURIComponent(key),{method:"GET"}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"מפתח Gemini API אינו תקין או אינו מורשה.");e.geminiStatus=resp.status;e.geminiCode=data&&data.error&&data.error.status||"";e.geminiApiCode=data&&data.error&&data.error.code||null;throw e;}return data;}
 
 
 const upload = multer({
@@ -317,221 +325,15 @@ async function analyzeWithGemini(ai, fileUri, mimeType, prompt) {
   return JSON.parse(response.text);
 }
 
-app.get("/api/health", function(_req, res) {
-  res.json({
-    ok: true,
-    model: MODEL,
-    auth: "google-oauth",
-    googleOAuthConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_CLOUD_PROJECT)
-  });
-});
+app.get("/api/health",function(_req,res){res.json({ok:true,model:MODEL,auth:"google-identity-only",googleOAuthConfigured:Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET),stripeConfigured:Boolean(process.env.STRIPE_SECRET_KEY),replicateConfigured:Boolean(process.env.REPLICATE_API_TOKEN),apiKeyRequired:true,dailyLimit:DAILY_SONG_LIMIT});});
 
-app.get("/auth/google", function(_req, res) {
-  if (!requireGoogleOAuth(res)) return;
-  const state = crypto.randomBytes(24).toString("hex");
-  oauthStates.set(state, Date.now());
-  const params = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID,
-    redirect_uri: APP_URL + "/auth/google/callback",
-    response_type: "code",
-    scope: OAUTH_SCOPES,
-    access_type: "offline",
-    prompt: "consent",
-    include_granted_scopes: "true",
-    state
-  });
-  res.redirect("https://accounts.google.com/o/oauth2/v2/auth?" + params.toString());
-});
-
-app.get("/auth/google/callback", async function(req, res) {
-  const state = String(req.query.state || "");
-  const code = String(req.query.code || "");
-  const created = oauthStates.get(state);
-  oauthStates.delete(state);
-  if (!created || Date.now() - created > 10 * 60 * 1000 || !code) return res.status(400).send("Google authentication state expired or invalid");
-  try {
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: process.env.GOOGLE_CLIENT_ID,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET,
-        redirect_uri: APP_URL + "/auth/google/callback",
-        grant_type: "authorization_code"
-      })
-    });
-    const tokens = await tokenRes.json();
-    if (!tokenRes.ok || !tokens.access_token) throw new Error(tokens.error_description || "Google token exchange failed");
-    const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: "Bearer " + tokens.access_token }
-    });
-    const user = await userRes.json();
-    if (!userRes.ok) throw new Error("Google user info failed");
-    const sessionId = crypto.randomBytes(32).toString("hex");
-    const grantedScopes = String(tokens.scope || "").split(/\s+/).filter(Boolean);
-    sessions.set(sessionId, {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || "",
-      expiresAt: Date.now() + Number(tokens.expires_in || 3600) * 1000,
-      grantedScopes,
-      user: { name: user.name || user.email || "Google user", email: user.email || "", picture: user.picture || "" }
-    });
-    setSessionCookie(res, sessionId);
-    res.redirect("/");
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Google authentication failed");
-  }
-});
-
-app.get("/api/auth/me", function(req, res) {
-  const session = authSession(req);
-  if (!session) return res.json({ authenticated: false });
-  res.json({
-    authenticated: true,
-    user: session.user,
-    geminiScopeGranted: Array.isArray(session.grantedScopes) && GEMINI_REQUIRED_SCOPES.every(function(scope) { return session.grantedScopes.includes(scope); })
-  });
-});
-
-app.post("/api/auth/logout", function(req, res) {
-  const token = cookieToken(req);
-  if (token) sessions.delete(token);
-  clearSessionCookie(res);
-  res.json({ ok: true });
-});
-
-async function refreshGoogleSession(session) {
-  if (!session.refreshToken || session.expiresAt > Date.now() + 60000) return session;
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      refresh_token: session.refreshToken,
-      grant_type: "refresh_token"
-    })
-  });
-  const tokens = await tokenRes.json();
-  if (!tokenRes.ok || !tokens.access_token) throw new Error(tokens.error_description || "Google token refresh failed");
-  session.accessToken = tokens.access_token;
-  session.expiresAt = Date.now() + Number(tokens.expires_in || 3600) * 1000;
-  return session;
-}
-
-async function geminiFetch(session, url, options) {
-  await refreshGoogleSession(session);
-  if (!Array.isArray(session.grantedScopes) || !GEMINI_REQUIRED_SCOPES.every(function(scope) { return session.grantedScopes.includes(scope); })) {
-    const error = new Error("Google authorization is missing the Gemini API cloud-platform scope. Please sign in with Google again and grant the requested Gemini permission.");
-    error.code = "INSUFFICIENT_SCOPE";
-    throw error;
-  }
-  const headers = Object.assign({}, options && options.headers || {}, {
-    Authorization: "Bearer " + session.accessToken,
-    "x-goog-user-project": process.env.GOOGLE_CLOUD_PROJECT
-  });
-  let response = await fetch(url, Object.assign({}, options || {}, { headers }));
-  if (response.status === 401 && session.refreshToken) {
-    session.expiresAt = 0;
-    await refreshGoogleSession(session);
-    headers.Authorization = "Bearer " + session.accessToken;
-    response = await fetch(url, Object.assign({}, options || {}, { headers }));
-  }
-  return response;
-}
-
-async function geminiPreflight(session) {
-  const response = await geminiFetch(
-    session,
-    "https://generativelanguage.googleapis.com/v1/models",
-    { method: "GET" }
-  );
-  const raw = await response.text();
-  let data = null;
-  try { data = raw ? JSON.parse(raw) : null; } catch {}
-  const error = data && data.error ? data.error : null;
-  const result = {
-    ok: response.ok,
-    status: response.status,
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    scopes: Array.isArray(session.grantedScopes) ? session.grantedScopes.slice() : [],
-    errorCode: error && error.code ? error.code : null,
-    errorStatus: error && error.status ? error.status : null,
-    errorMessage: error && error.message ? error.message : null
-  };
-  console.info("Gemini preflight", JSON.stringify(result));
-  if (!response.ok) {
-    const e = new Error(error && error.message ? error.message : "Gemini API preflight failed");
-    e.geminiStatus = response.status;
-    e.geminiCode = error && error.status ? error.status : "";
-    throw e;
-  }
-  return data;
-}
-
-async function geminiModelPreflight(session, modelName) {
-  const checkedModel = modelName || MODEL;
-  const encodedModel = encodeURIComponent(checkedModel);
-  const response = await geminiFetch(
-    session,
-    "https://generativelanguage.googleapis.com/v1beta/models/" + encodedModel,
-    { method: "GET" }
-  );
-  const raw = await response.text();
-  let data = null;
-  try { data = raw ? JSON.parse(raw) : null; } catch {}
-  const error = data && data.error ? data.error : null;
-  const result = {
-    ok: response.ok,
-    status: response.status,
-    model: checkedModel,
-    errorCode: error && error.code ? error.code : null,
-    errorStatus: error && error.status ? error.status : null,
-    errorMessage: error && error.message ? error.message : null
-  };
-  console.info("Gemini model preflight", JSON.stringify(result));
-  if (!response.ok) {
-    const e = new Error(error && error.message ? error.message : "Gemini model preflight failed");
-    e.geminiStatus = response.status;
-    e.geminiCode = error && error.status ? error.status : "";
-    e.geminiApiCode = error && error.code ? error.code : null;
-    throw e;
-  }
-  return data;
-}
-
-async function uploadGeminiFile(session, filePath, mimeType, displayName) {
-  const stat = await fs.stat(filePath);
-  const start = await geminiFetch(session, "https://generativelanguage.googleapis.com/upload/v1beta/files", {
-    method: "POST",
-    headers: {
-      "X-Goog-Upload-Protocol": "resumable",
-      "X-Goog-Upload-Command": "start",
-      "X-Goog-Upload-Header-Content-Length": String(stat.size),
-      "X-Goog-Upload-Header-Content-Type": mimeType,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ file: { display_name: displayName } })
-  });
-  if (!start.ok) throw new Error("Gemini file upload start failed: " + await start.text());
-  const uploadUrl = start.headers.get("x-goog-upload-url");
-  if (!uploadUrl) throw new Error("Gemini did not return an upload URL");
-  const bytes = await fs.readFile(filePath);
-  const finish = await geminiFetch(session, uploadUrl, {
-    method: "POST",
-    headers: {
-      "Content-Length": String(bytes.length),
-      "X-Goog-Upload-Offset": "0",
-      "X-Goog-Upload-Command": "upload, finalize"
-    },
-    body: bytes
-  });
-  const data = await finish.json();
-  if (!finish.ok || !data.file) throw new Error("Gemini file upload failed: " + JSON.stringify(data));
-  return data.file;
-}
+app.get("/auth/google",function(_req,res){if(!requireGoogleOAuth(res))return;const state=crypto.randomBytes(24).toString("hex");oauthStates.set(state,Date.now());const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:APP_URL+"/auth/google/callback",response_type:"code",scope:OAUTH_SCOPES,state:state});res.redirect("https://accounts.google.com/o/oauth2/v2/auth?"+params.toString());});
+app.get("/auth/google/callback",async function(req,res){const state=String(req.query.state||""),code=String(req.query.code||""),created=oauthStates.get(state);oauthStates.delete(state);if(!created||Date.now()-created>10*60*1000||!code)return res.status(400).send("Google authentication state expired or invalid");try{const tokenRes=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:code,client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:APP_URL+"/auth/google/callback",grant_type:"authorization_code"})}),tokens=await tokenRes.json();if(!tokenRes.ok||!tokens.access_token)throw new Error(tokens.error_description||"Google token exchange failed");const userRes=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+tokens.access_token}}),user=await userRes.json();if(!userRes.ok||!user.sub)throw new Error("Google user info failed");const sessionId=crypto.randomBytes(32).toString("hex");sessions.set(sessionId,{user:{id:String(user.sub),name:user.name||user.email||"Google user",email:normalizeEmail(user.email),picture:user.picture||""},premium:false,premiumCheckedAt:0,createdAt:Date.now()});setSessionCookie(res,sessionId);res.redirect("/");}catch(error){console.error(error);res.status(500).send("Google authentication failed");}});
+app.get("/api/auth/me",async function(req,res){const session=authSession(req);if(!session)return res.json({authenticated:false,premium:false,plan:"standard",dailyRemaining:null,dailyUsed:null,paymentConfigured:Boolean(process.env.STRIPE_SECRET_KEY),apiKeyRequired:true});const premium=await isPremiumSession(session),usage=premium?{remaining:null,used:null}:await getDailyUsage(accountIdForUser(session.user));res.json({authenticated:true,user:session.user,premium:premium,plan:premium?"premium":"standard",dailyRemaining:premium?null:usage.remaining,dailyUsed:premium?null:usage.used,paymentConfigured:Boolean(process.env.STRIPE_SECRET_KEY),apiKeyRequired:true});});
+app.post("/api/auth/logout",function(req,res){const token=cookieToken(req);if(token)sessions.delete(token);clearSessionCookie(res);res.json({ok:true});});
+app.post("/api/premium/checkout",async function(req,res){const session=authSession(req);if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני רכישת Premium."});const accountId=accountIdForUser(session.user);if(await isPremiumSession(session))return res.json({alreadyPremium:true});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions","POST",{mode:"payment",locale:"he",success_url:APP_URL+"/?premium=success&session_id={CHECKOUT_SESSION_ID}",cancel_url:APP_URL+"/?premium=cancel",customer_email:normalizeEmail(session.user.email),client_reference_id:accountId,"line_items[0][price_data][currency]":PREMIUM_CURRENCY,"line_items[0][price_data][product_data][name]":PREMIUM_PRODUCT_NAME,"line_items[0][price_data][product_data][description]":"גישה מלאה ל-Chord Studio, ללא מגבלת שירים יומית ועם הפרדת קול הזמר","line_items[0][price_data][unit_amount]":String(PREMIUM_AMOUNT),"line_items[0][quantity]":"1","metadata[chord_studio_premium]":"1","metadata[account_id]":accountId,"payment_intent_data[metadata][chord_studio_premium]":"1","payment_intent_data[metadata][account_id]":accountId});if(!checkout||!checkout.url)throw new Error("Stripe לא החזיר קישור לתשלום.");res.json({url:checkout.url});}catch(error){console.error("Stripe checkout failed",String(error&&error.stack||error));res.status(502).json({error:"יצירת התשלום נכשלה: "+String(error&&error.message||error).slice(0,250)});}});
+app.get("/api/premium/confirm",async function(req,res){const session=authSession(req),sessionId=String(req.query.session_id||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני אישור התשלום."});if(!sessionId)return res.status(400).json({error:"חסר מזהה תשלום."});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions/"+encodeURIComponent(sessionId),"GET");const accountId=accountIdForUser(session.user),paid=checkout&&checkout.status==="complete"&&checkout.payment_status==="paid"&&Number(checkout.amount_total)===PREMIUM_AMOUNT&&String(checkout.currency||"").toLowerCase()===PREMIUM_CURRENCY&&checkout.metadata&&checkout.metadata.account_id===accountId&&checkout.metadata.chord_studio_premium==="1";if(!paid)return res.status(403).json({error:"התשלום לא אומת עבור חשבון Google הזה."});session.premium=true;session.premiumCheckedAt=Date.now();res.json({ok:true,premium:true});}catch(error){console.error("Stripe payment confirmation failed",String(error&&error.stack||error));res.status(502).json({error:"אימות התשלום נכשל: "+String(error&&error.message||error).slice(0,250)});}});
+async function requireUploadAccess(req,res,options){const session=authSession(req);if(!session){res.status(401).json({error:"יש להתחבר עם Google לפני העלאת קובץ."});return false;}const apiKey=String(req.headers["x-gemini-api-key"]||"").trim();if(!apiKey){res.status(401).json({error:"חייבים להזין מפתח Gemini API לפני העלאת קובץ."});return false;}const premium=await isPremiumSession(session);if(options&&options.premiumRequired&&!premium){res.status(403).json({error:"התכונה הזו זמינה רק במצב Premium. שדרג את החשבון כדי להשתמש בה."});return false;}let usageReservation=null;if(options&&options.consumeDaily&&!premium){const quota=await reserveDailyUsage(accountIdForUser(session.user));if(!quota.allowed){res.status(429).json({error:"הגעת למכסה של שיר אחד ליום במצב רגיל. מצב Premium פותח ניתוח ללא הגבלה.",dailyRemaining:0});return false;}usageReservation=quota;}try{if(options&&options.validateGeminiKey)await geminiApiKeyPreflight(apiKey);}catch(error){if(usageReservation)releaseDailyUsage(usageReservation.reservationKey);res.status(400).json({error:"מפתח Gemini API אינו תקין: "+String(error&&error.message||error).slice(0,300)});return false;}req.auth={session:session,apiKey:apiKey,premium:premium,usageReservation:usageReservation};req.operationId=operationId(req);logOperation(req.operationId,"access_granted",premium?"חשבון Premium ומפתח API אומתו; ניתן להעלות את הקובץ":"חשבון Google, מפתח API ומכסת היום אומתו; ניתן להעלות את הקובץ","success");return true;}
 
 async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model) {
   const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey), {
@@ -552,227 +354,18 @@ async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, mo
   return JSON.parse(text);
 }
 
-async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model) {
-  const response = await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mimeType, data: audioBase64 } }
-        ]
-      }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: SCHEMA,
-        thinkingConfig: { thinkingLevel: "high" }
-      }
-    })
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    const error = new Error(data.error && data.error.message || "Gemini generation failed");
-    error.geminiStatus = response.status;
-    error.geminiCode = data.error && data.error.status || "";
-    error.geminiApiCode = data.error && data.error.code || null;
-    const retryAfter = Number(response.headers.get("retry-after"));
-    error.retryAfterSeconds = Number.isFinite(retryAfter) ? retryAfter : 0;
-    throw error;
-  }
-  const text = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
-    ? data.candidates[0].content.parts.map(function(p) { return p.text || ""; }).join("")
-    : "";
-  if (!text) throw new Error("Gemini returned an empty response");
-  return JSON.parse(text);
-}
+async function analyzeWithGeminiRetry(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){const delays=[2000,5000,10000];let lastError=null;for(let modelIndex=0;modelIndex<MODELS.length;modelIndex++){const model=MODELS[modelIndex];for(let attempt=0;;attempt++){try{return await analyzeWithGeminiApiKey(apiKey,audioBase64,mimeType,prompt,model);}catch(error){lastError=error;const status=Number(error&&error.geminiStatus)||null,code=String(error&&error.geminiCode||""),message=String(error&&error.message||error),notFound=status===404||code==="NOT_FOUND";if(notFound&&modelIndex<MODELS.length-1)break;const retryable=status===429||status===503||code==="RESOURCE_EXHAUSTED"||code==="UNAVAILABLE"||/high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message);if(!retryable)throw error;const retryHeader=Number(error.retryAfterSeconds)||0,delayMatch=message.match(/retry in\s+([0-9]+(?:\.[0-9]+)?)\s*s/i),wait=Math.max(retryHeader*1000,delayMatch?Number(delayMatch[1])*1000:0,/quota exceeded|generate_content_free_tier_requests/i.test(message)?60000:delays[Math.min(attempt,delays.length-1)]);if(attempt<delays.length){await new Promise(function(resolve){setTimeout(resolve,wait)});continue;}if(modelIndex<MODELS.length-1)break;throw lastError;}}}throw lastError||new Error("All Gemini models failed");}
 
-async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, operationId, stage, apiKey) {
-  const delays = [2000, 5000, 10000];
-  let lastError = null;
-  for (let modelIndex = 0; modelIndex < MODELS.length; modelIndex += 1) {
-    const model = MODELS[modelIndex];
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        logOperation(operationId, stage + "_model", "מנסה ניתוח באמצעות " + model + " (" + (modelIndex + 1) + " מתוך " + MODELS.length + ")");
-        return await (apiKey ? analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model) : analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model));
-      } catch (error) {
-        lastError = error;
-        const message = String(error && error.message || error);
-        const status = Number(error && error.geminiStatus) || null;
-        const apiCode = String(error && error.geminiCode || "");
-        logOperation(operationId, stage + "_api_error", JSON.stringify({model:model,status:status,apiCode:apiCode,message:message.slice(0,500)}), "error");
-        const unavailableModel = status === 404 || apiCode === "NOT_FOUND";
-        if (unavailableModel && modelIndex < MODELS.length - 1) {
-          logOperation(operationId, stage + "_fallback", model + " לא נמצא או אינו זמין (HTTP " + status + "); עובר למודל הבא", "warn");
-          break;
-        }
-        const retryable = status === 429 || status === 503 || apiCode === "RESOURCE_EXHAUSTED" || apiCode === "UNAVAILABLE" || /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message);
-        if (!retryable) throw error;
-        // Respect Google's Retry-After / retryDelay instead of retrying on a fixed,
-        // shorter schedule. Google may return either HTTP Retry-After or a delay
-        // embedded in the human-readable error message.
-        const retryAfterHeader = Number(error.retryAfterSeconds) || 0;
-        const messageDelay = message.match(/retry in\\s+([0-9]+(?:\\.[0-9]+)?)\\s*s/i);
-        const googleDelayMs = Math.max(retryAfterHeader * 1000, messageDelay ? Number(messageDelay[1]) * 1000 : 0);
-        const isQuotaExhausted = apiCode === "RESOURCE_EXHAUSTED" || /quota exceeded|generate_content_free_tier_requests/i.test(message);
-        if (attempt < delays.length) {
-          const wait = Math.max(googleDelayMs, isQuotaExhausted ? 60000 : delays[attempt]);
-          logOperation(operationId, stage + "_retry", model + " החזיר שגיאה זמנית (HTTP " + (status || "לא ידוע") + ", " + (apiCode || "ללא קוד") + "); ממתין " + Math.ceil(wait / 1000) + " שניות לפי מגבלת Google לפני ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length);
-          await new Promise(function(resolve) { setTimeout(resolve, wait); });
-          continue;
-        }
-        if (modelIndex < MODELS.length - 1) {
-          logOperation(operationId, stage + "_fallback", model + " עדיין לא זמין; עובר למודל הבא");
-          break;
-        }
-        throw lastError;
-      }
-    }
-  }
-  throw lastError || new Error("All Gemini models failed");
-}
+app.get("/api/gemini-diagnostic",async function(req,res){const session=authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני בדיקת Gemini."});if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני בדיקת Gemini."});try{const data=await geminiApiKeyPreflight(apiKey),models=data&&Array.isArray(data.models)?data.models:[];res.json({ok:true,model:MODEL,models:models.map(function(item){return{name:item.name,methods:item.supportedGenerationMethods||[]};})});}catch(error){res.status(502).json({ok:false,status:error.geminiStatus||null,code:error.geminiCode||null,apiCode:error.geminiApiCode||null,error:String(error.message||error)});}});
 
-app.get("/api/gemini-diagnostic", async function(req, res) {
-  const session = authSession(req);
-  if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני בדיקת Gemini." });
-  if (!requireGoogleOAuth(res)) return;
-  try {
-    const models = await geminiPreflight(session);
-    const modelChecks = await Promise.all(MODELS.map(async function(modelName) {
-      try {
-        const info = await geminiModelPreflight(session, modelName);
-        return { model: modelName, ok: true, name: info && info.name || null, methods: info && info.supportedGenerationMethods || [] };
-      } catch (error) {
-        return { model: modelName, ok: false, status: error.geminiStatus || null, apiCode: error.geminiApiCode || error.geminiCode || null, error: String(error.message || error).slice(0, 400) };
-      }
-    }));
-    res.json({
-      ok: true,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      scopes: Array.isArray(session.grantedScopes) ? session.grantedScopes.slice() : [],
-      model: MODEL,
-      fallbackModels: MODELS,
-      modelChecks: modelChecks,
-      modelListCount: models && Array.isArray(models.models) ? models.models.length : null,
-      listedModels: models && Array.isArray(models.models) ? models.models.map(function(item) { return item.name; }).filter(Boolean) : []
-    });
-  } catch (error) {
-    console.error("Gemini diagnostic failed", error);
-    res.status(502).json({
-      ok: false,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      model: MODEL,
-      status: error && error.geminiStatus ? error.geminiStatus : null,
-      code: error && error.geminiCode ? error.geminiCode : null,
-      apiCode: error && error.geminiApiCode ? error.geminiApiCode : null,
-      error: error && error.message ? error.message : "Gemini diagnostic failed"
-    });
-  }
-});
-
-app.post("/api/verify/:id",async function(req,res){
-  const session=authSession(req);
-  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
-  const pending=pendingVerifications.get(id);
-  if(!pending)return res.status(404).json({error:"לא נמצאה תוצאת ניתוח זמינה לאימות. הרץ ניתוח ראשוני מחדש."});
-  if(!session&&!pending.apiKey)return res.status(401).json({error:"יש להתחבר מחדש כדי לאמת את השיר."});
-  try{
-    logOperation(id,"analysis_verify","האימות הנוסף התחיל לפי בקשת המשתמש");
-    const verified=cleanAnalysis(await analyzeWithGeminiRetry(
-      session,
-      pending.audioBase64,
-      pending.mimeType,
-      VERIFY_PREFIX + metadataPromptBlock(pending.filename, pending.audioMetadata) + "\nCandidate JSON:\n" + JSON.stringify(pending.first),
-      id,
-      "analysis_verify",
-      pending.apiKey
-    ));
-    pendingVerifications.delete(id);
-    logOperation(id,"verification_completed","האימות הסתיים; התוצאה המעודכנת מוכנה","success");
-    res.json({analysis:verified,verified:true});
-  }catch(error){
-    logOperation(id,"verification_failed","האימות לא הושלם: "+String(error&&error.message||error).slice(0,350),"error");
-    res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});
-  }
-});
+app.post("/api/verify/:id",async function(req,res){const session=authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim(),id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),pending=pendingVerifications.get(id);if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני האימות."});if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני האימות."});if(!pending)return res.status(404).json({error:"לא נמצאה תוצאת ניתוח זמינה לאימות. הרץ ניתוח ראשוני מחדש."});try{await geminiApiKeyPreflight(apiKey);const verified=cleanAnalysis(await analyzeWithGeminiRetry(apiKey,pending.audioBase64,pending.mimeType,VERIFY_PREFIX+metadataPromptBlock(pending.filename,pending.audioMetadata)+"\nCandidate JSON:\n"+JSON.stringify(pending.first),id,"analysis_verify"));pendingVerifications.delete(id);res.json({analysis:verified,verified:true});}catch(error){res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});}});
 
 app.get("/api/operations/:id",function(req,res){
  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
  if(!authSession(req))return res.status(401).json({error:"לא מחובר"});
  res.setHeader("Cache-Control","no-store");res.json({operationId:id,events:operations.get(id)||[]});
 });
-app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);logOperation(req.operationId,"upload_receiving","השרת התחיל לקבל את קובץ האודיו");next();},upload.single("audio"),async function(req,res){
-  const session = authSession(req);
-  const apiKey = String(req.headers["x-gemini-api-key"] || "").trim();
-  if (!session && !apiKey) return res.status(401).json({ error: "יש להתחבר עם Google או להזין מפתח Gemini API לפני ניתוח שיר." });
-  if (!apiKey && !requireGoogleOAuth(res)) return;
-  if (!req.file) {
-    logOperation(req.operationId,"upload_failed","השרת לא קיבל קובץ בשדה audio","error");
-    console.warn("Audio upload missing: multer did not receive field audio");
-    return res.status(400).json({ error: "לא התקבל קובץ אודיו. נסה לבחור את הקובץ שוב." });
-  }
-
-  try {
-    const stat = await fs.stat(req.file.path);
-    console.info("Audio upload received", JSON.stringify({ size: stat.size, mimeType: req.file.mimetype || "audio/mpeg", originalName: path.basename(req.file.originalname || "audio") }));
-    logOperation(req.operationId,"upload_received","הקובץ התקבל בשרת ("+stat.size+" בתים)","success");
-    logOperation(req.operationId,"gemini_preflight","בודק גישה ל־Gemini ולפרויקט Google Cloud");
-    if (!apiKey) await geminiPreflight(session);
-    else logOperation(req.operationId,"gemini_preflight","נבחר מפתח API אישי; מדלג על בדיקת OAuth");
-    logOperation(req.operationId,"model_check","בדיקת הרשאות הושלמה; זמינות כל מודל תיבדק לפי קוד התשובה בזמן הניסיון");
-    if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
-    if (stat.size > INLINE_AUDIO_MAX_BYTES) {
-      return res.status(413).json({
-        error: "הקובץ גדול מדי למצב Google OAuth ללא מפתח Gemini. כרגע נתמכים קבצי אודיו עד 14MB."
-      });
-    }
-
-    // Gemini's standard Files API upload endpoint rejects the user OAuth bearer
-    // token used by this app. Send small audio inline to generateContent instead.
-    logOperation(req.operationId,"audio_prepare","מכין את האודיו לשליחה למודל");
-    const audioBase64 = (await fs.readFile(req.file.path)).toString("base64");
-    const mimeType = req.file.mimetype || "audio/mpeg";
-
-    logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");
-    const filenameHintValue = filenameHint(req.file.originalname || "");
-    const audioMetadata = await extractAudioMetadata(req.file.path);
-    logOperation(req.operationId,"metadata_read","נקראו פרטי הקובץ לזיהוי השיר");
-    const analysisPrompt = PRIMARY_PROMPT + metadataPromptBlock(filenameHintValue, audioMetadata);
-    const first = cleanAnalysis(await analyzeWithGeminiRetry(
-      session,
-      audioBase64,
-      mimeType,
-      analysisPrompt,
-      req.operationId,
-      "analysis_primary",
-      apiKey
-    ));
-
-    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,apiKey:apiKey,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
-    logOperation(req.operationId,"primary_completed","הניתוח הראשוני הסתיים; דף השיר מוצג וניתן להפעיל אימות נוסף","success");
-    res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});
-  } catch (error) {
-    console.error("Gemini analysis failed", JSON.stringify({
-      status: error && error.geminiStatus ? error.geminiStatus : null,
-      code: error && error.geminiCode ? error.geminiCode : null,
-      apiCode: error && error.geminiApiCode ? error.geminiApiCode : null,
-      message: error && error.message ? error.message : String(error)
-    }));
-    if (error && (error.code === "INSUFFICIENT_SCOPE" || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(String(error.message || "")))) {
-      const token = cookieToken(req);
-      if (token) sessions.delete(token);
-      clearSessionCookie(res);
-      return res.status(401).json({
-        error: "הרשאת Gemini בחשבון Google חסרה או ישנה. התנתק והתחבר מחדש עם Google כדי לאשר את הרשאת Gemini."
-      });
-    }
-    res.status(500).json({ error: error && error.message ? "Gemini: " + error.message : "ניתוח השיר נכשל" });
-  } finally {
-    try { await fs.unlink(req.file.path); } catch {}
-  }
-});
+app.post("/api/analyze",async function(req,res){const access=await requireUploadAccess(req,res,{consumeDaily:true,validateGeminiKey:true});if(access!==true)return;logOperation(req.operationId,"upload_receiving","השרת התחיל לקבל את קובץ האודיו");upload.single("audio")(req,res,async function(uploadError){const usageReservation=req.auth&&req.auth.usageReservation;if(uploadError){if(usageReservation)releaseDailyUsage(usageReservation.reservationKey);if(uploadError.code==="LIMIT_FILE_SIZE")return res.status(413).json({error:"הקובץ גדול מדי (מקסימום 200MB)."});return res.status(400).json({error:"העלאת הקובץ נכשלה: "+String(uploadError.message||uploadError).slice(0,200)});}if(!req.file){if(usageReservation)releaseDailyUsage(usageReservation.reservationKey);return res.status(400).json({error:"לא התקבל קובץ אודיו. נסה לבחור את הקובץ שוב."});}try{const stat=await fs.stat(req.file.path);if(!stat.size)throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");if(stat.size>INLINE_AUDIO_MAX_BYTES)throw new Error("הקובץ גדול מדי לניתוח ב-Gemini (מקסימום 14MB).");const audioBase64=(await fs.readFile(req.file.path)).toString("base64"),mimeType=req.file.mimetype||"audio/mpeg",filenameHintValue=filenameHint(req.file.originalname||""),audioMetadata=await extractAudioMetadata(req.file.path);logOperation(req.operationId,"upload_received","הקובץ התקבל בשרת ("+stat.size+" בתים)","success");const first=cleanAnalysis(await analyzeWithGeminiRetry(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});if(usageReservation)await commitDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.date);res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});}catch(error){if(usageReservation)releaseDailyUsage(usageReservation.reservationKey);res.status(500).json({error:error&&error.message?"Gemini: "+error.message:"ניתוח השיר נכשל"});}finally{try{await fs.unlink(req.file.path);}catch{}}});});
 
 const NOTES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const NOTES_FLAT = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
@@ -963,33 +556,7 @@ function groupWordsForWordExport(analysis, shift, mode) {
   return groups;
 }
 
-app.post("/api/separate-vocals", upload.single("audio"), async function(req, res) {
-  if (!process.env.REPLICATE_API_TOKEN) {
-    if (req.file) { try { await fs.unlink(req.file.path); } catch {} }
-    return res.status(503).json({ error: "מערכת הפרדת הקול הוכנה, אך חסר בשרת מפתח Replicate (REPLICATE_API_TOKEN). יש להגדיר אותו בהגדרות Render." });
-  }
-  if (!req.file) return res.status(400).json({ error: "לא התקבל קובץ אודיו להפרדה." });
-  try {
-    const stat = await fs.stat(req.file.path);
-    if (!stat.size) return res.status(400).json({ error: "קובץ האודיו ריק." });
-    if (stat.size > 200 * 1024 * 1024) return res.status(413).json({ error: "הקובץ גדול מדי להפרדת קול (מקסימום 200MB)." });
-    const bytes = await fs.readFile(req.file.path);
-    const audioFile = new File([bytes], path.basename(req.file.originalname || "song-audio"), { type: req.file.mimetype || "audio/mpeg" });
-    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-    const output = await replicate.run(
-      "cjwbw/demucs:25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",
-      { input: { audio: audioFile, stem: "vocals", model_name: "htdemucs_ft", shifts: 2, overlap: 0.25, clip_mode: "rescale", output_format: "mp3", mp3_bitrate: 320 } }
-    );
-    const vocalsUrl = output && (output.vocals || output["vocals"]);
-    if (!vocalsUrl || typeof vocalsUrl !== "string") throw new Error("מודל ההפרדה לא החזיר קובץ קול זמר תקין.");
-    res.json({ vocalsUrl: vocalsUrl, model: "Demucs htdemucs_ft" });
-  } catch (error) {
-    console.error("Vocal separation failed", String(error && error.stack || error));
-    res.status(502).json({ error: "הפרדת הקול נכשלה: " + String(error && error.message || "שגיאה בשירות ההפרדה").slice(0, 300) });
-  } finally {
-    try { await fs.unlink(req.file.path); } catch {}
-  }
-});
+app.post("/api/separate-vocals",async function(req,res){const access=await requireUploadAccess(req,res,{premiumRequired:true,validateGeminiKey:false});if(access!==true)return;upload.single("audio")(req,res,async function(uploadError){if(uploadError){if(uploadError.code==="LIMIT_FILE_SIZE")return res.status(413).json({error:"קובץ ההפרדה גדול מדי (מקסימום 200MB)."});return res.status(400).json({error:"העלאת הקובץ נכשלה: "+String(uploadError.message||uploadError).slice(0,200)});}if(!req.file)return res.status(400).json({error:"לא התקבל קובץ אודיו להפרדה."});try{const bytes=await fs.readFile(req.file.path),audioFile=new File([bytes],path.basename(req.file.originalname||"song-audio"),{type:req.file.mimetype||"audio/mpeg"});if(!process.env.REPLICATE_API_TOKEN)throw new Error("מערכת הפרדת הקול עדיין לא הוגדרה בשרת. חסר REPLICATE_API_TOKEN.");const replicate=new Replicate({auth:process.env.REPLICATE_API_TOKEN}),output=await replicate.run("cjwbw/demucs:25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",{input:{audio:audioFile,stem:"vocals",model_name:"htdemucs_ft",shifts:2,overlap:0.25,clip_mode:"rescale",output_format:"mp3",mp3_bitrate:320}}),vocalsUrl=output&&(output.vocals||output["vocals"]);if(!vocalsUrl||typeof vocalsUrl!=="string")throw new Error("מודל ההפרדה לא החזיר קובץ קול זמר תקין.");res.json({vocalsUrl:vocalsUrl,model:"Demucs htdemucs_ft"});}catch(error){res.status(502).json({error:"הפרדת הקול נכשלה: "+String(error&&error.message||error).slice(0,300)});}finally{try{await fs.unlink(req.file.path);}catch{}}});});
 
 app.post("/api/export/docx", async function(req, res) {
   try {
