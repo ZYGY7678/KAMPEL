@@ -123,13 +123,14 @@ const PRIMARY_PROMPT = [
   "The uploaded filename is provided separately as a clue for identifying the song title and artist. Use it carefully; do not treat an unverified filename as proof and do not invent metadata.",
   "Return ONLY structured JSON matching the supplied schema.",
   "",
-  "Transcribe the lyrics faithfully in the sung language across the COMPLETE recording, including every verse, chorus, bridge, repeated section, intro/outro vocal, and ending. Do not stop after the first section and do not summarize or omit repeated lyrics. Continue scanning sequentially until the audio ends; preserve the original order. If a section is unclear, mark only the uncertain words as omitted rather than dropping the rest of the song.",
-  "Return all detected lyric lines and chord events for the full duration. Ensure the final word and final chord events are covered through the end of the recording.",
+  "Transcribe the lyrics faithfully in the sung language across the COMPLETE recording, including every verse, chorus, bridge, repeated section, intro/outro vocal, instrumental interlude, turnaround, transition between sections, and ending. Do not stop after the first section and do not summarize or omit repeated lyrics. Continue scanning sequentially until the audio ends; preserve the original order. If a section is unclear, mark only the uncertain words as omitted rather than dropping the rest of the song.",
+  "Return all detected lyric lines and the COMPLETE chord timeline for the full duration, including lyric-free instrumental passages. The chords array is independent of lyric words: never omit chords only because nobody is singing at that moment. In particular, detect and return the harmony of every instrumental transition/מעבר between verse, chorus and bridge, every interlude/turnaround, intro, and outro. Ensure the final word and final chord events are covered through the end of the recording.",
   "For every lyric word provide real start and end seconds on the original audio timeline.",
+  "Hebrew lyric text: preserve the exact sung wording and add Hebrew vowel-point niqqud (ניקוד: קמץ, פתח, חיריק, חולם, שורוק, קובוץ וכו') according to the pronunciation you actually hear when it can be determined confidently. Also preserve natural punctuation such as commas, question marks and exclamation marks when the sung phrasing supports them. Never invent spelling, niqqud or punctuation just to make the text look complete.",
   "Chord rhythm and density: in a regular 4/4 passage, use one chord event per complete four-beat measure (four regular beats), not one chord per beat. Estimate beat duration from BPM and place the chord at the start of the measure or where the harmony audibly changes. Do not create extra chord changes merely because a beat or lyric word occurs. Only in genuinely exceptional passages where the harmony audibly changes unusually within the measure or clearly departs from the regular four-beat pattern, include the sequence of distinct chords at their actual change times. Treat these exceptions as rare and audio-evidenced, not as a default. If the same chord sustains across measures, do not repeat its label on every beat or word; preserve a new event only when a distinct chord change or meaningful re-entry is heard.",
   "Prefer standard chord names such as Bb, F#m7, Cmaj7, G/B.",
   "Determine the overall key and BPM when possible. Also identify the capo fret used in the recording, if a capo is audible or indicated by the arrangement; return capo as an integer from 0 to 12, using 0 when no capo is used and null only when it cannot be determined. Do not confuse capo position with song key.",
-  "Preserve section boundaries such as Intro, Verse, Pre-Chorus, Chorus, Bridge and Outro when they can be inferred.",
+  "Preserve section boundaries and label them explicitly. For verses use the order of the song: first verse = בית א, second verse = בית ב, third verse = בית ג, and so on. Label every chorus/refrain as פזמון. Preserve other section types such as Intro, Pre-Chorus, Bridge and Outro. When an instrumental transition has no lyrics, it may be represented by an empty-words line with section = מעבר, but its chord changes MUST still be present in the independent chords array.",
   "",
   "Critical chord display rule: place a chord label only ONCE, at the first suitable sung word at or immediately after that chord change. Never repeat the same sustained chord above every subsequent word. Leave chord=null on words while the same chord continues; add a new anchor only when the harmony changes to a different chord. If the same chord returns after a different chord, anchor it again at its new entrance. Keep the complete chord timeline in the chords array independently of word anchors.",
   "Re-check every chord change against the actual audio, especially around vocal entrances. Scan the entire audio timeline in order, not just selected excerpts.",
@@ -143,8 +144,10 @@ const VERIFY_PREFIX = [
   "The attached audio is the source of truth.",
   "Audit the candidate JSON below and return the COMPLETE corrected object using the supplied schema.",
   "",
-  "Correct lyric words or timestamps that do not match the audio.",
+  "Correct lyric words, Hebrew niqqud/punctuation, or timestamps that do not match the audio.",
+  "For Hebrew, keep vowel-point niqqud according to the sung pronunciation when it is confidently supported by what is heard; do not invent niqqud. Preserve natural punctuation when supported by phrasing.",
   "Verify the capo position too: return capo as an integer from 0 to 12, use 0 when no capo is used, and null only when uncertain. Do not confuse capo position with song key. Correct chord names and chord change times when the audio disagrees. In regular 4/4 sections, prefer one chord per four-beat measure rather than one per beat; include multiple distinct chords within a measure only for clearly audible exceptional harmonic changes.",
+  "Audit the COMPLETE chord timeline, including all lyric-free instrumental transitions/מעברים, interludes, turnarounds, intros and outros. Chords must not disappear just because there are no lyric words. Every meaningful audible harmonic change in a transition must remain in the chords array.",
   "Keep all events chronological and keep all times inside the song duration.",
   "For a chord-to-word anchor, only use a lyric word when the chord starts at or very near that word's start. Place each chord label once per chord event, not on every word where the chord sustains. Leave other words chord=null. If a chord repeats after a different chord, create a fresh anchor. When possible, chordOffset should identify the character index inside the word where the harmonic change lands; otherwise use 0.",
   "Verify coverage from 0 seconds through the exact end of the audio. Include all lyrics and chord events across every section; never return only the first portion due to convenience. If output limits are approached, prioritize complete chronological coverage and concise word-level entries rather than omitting later sections.",
@@ -165,13 +168,52 @@ function applyFilenameMetadata(analysis, filename) {
   return analysis;
 }
 
+function sectionKind(section) {
+  const s = String(section || "").trim().toLowerCase();
+  if (/chorus|refrain|פזמון/.test(s)) return "chorus";
+  if (/pre[- ]?chorus|קדם[- ]?פזמון/.test(s)) return "prechorus";
+  if (/bridge|גשר/.test(s)) return "bridge";
+  if (/intro|opening|פתיחה/.test(s)) return "intro";
+  if (/outro|ending|סיום/.test(s)) return "outro";
+  if (/transition|interlude|turnaround|מעבר|אינטרלוד/.test(s)) return "transition";
+  if (/verse|בית/.test(s)) return "verse";
+  return "other";
+}
+
+function hebrewVerseLabel(n) {
+  const letters = ["א","ב","ג","ד","ה","ו","ז","ח","ט","י","יא","יב","יג","יד","טו"];
+  return letters[n - 1] ? "בית " + letters[n - 1] : "בית " + n;
+}
+
+function normalizeSectionLabels(lines) {
+  let verseCount = 0;
+  let previousKind = "";
+  return (lines || []).map(function(line) {
+    const raw = String(line.section || "").trim();
+    const kind = sectionKind(raw);
+    let section = raw;
+    if (kind === "verse") {
+      const explicit = raw.match(/(?:verse|בית)\s*(?:no\.\s*)?([0-9]+)/i);
+      if (previousKind !== "verse") verseCount += 1;
+      if (explicit) verseCount = Math.max(verseCount, Number(explicit[1]) || verseCount);
+      section = hebrewVerseLabel(verseCount);
+    } else if (kind === "chorus") {
+      section = "פזמון";
+    } else if (kind === "transition") {
+      section = "מעבר";
+    }
+    previousKind = kind;
+    return Object.assign({}, line, { section: section });
+  });
+}
+
 function cleanAnalysis(value) {
   const data = value && typeof value === "object" ? value : {};
   const duration = Number(data.duration) > 0 ? Number(data.duration) : 0;
   const lines = Array.isArray(data.lines) ? data.lines : [];
   const chords = Array.isArray(data.chords) ? data.chords : [];
 
-  const outLines = lines.map(function(line, i) {
+  const rawLines = lines.map(function(line, i) {
     const words = Array.isArray(line.words) ? line.words : [];
     return {
       id: String(line.id || "line-" + i),
@@ -187,11 +229,13 @@ function cleanAnalysis(value) {
           start: start,
           end: end,
           chord: w.chord == null ? null : String(w.chord).trim() || null,
-            chordOffset: w.chordOffset == null ? null : Math.max(0, Math.floor(Number(w.chordOffset) || 0))
+          chordOffset: w.chordOffset == null ? null : Math.max(0, Math.floor(Number(w.chordOffset) || 0))
         };
       })
     };
   });
+
+  const outLines = normalizeSectionLabels(rawLines);
 
   const outChords = chords.map(function(c) {
     return {
