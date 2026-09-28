@@ -690,6 +690,12 @@ app.post("/api/export/docx", async function(req, res) {
 app.use(express.static(publicDir));
 
 const port = Number(process.env.PORT || 10000);
-app.listen(port, "0.0.0.0", function() {
+app.listen(port, "0.0.0.0", async function() {
   console.log("Chord Studio listening on " + port);
+  if (supabaseReady()) {
+    try { await sb("app_accounts?select=account_id&limit=1"); console.log("Supabase persistence check passed"); }
+    catch (error) { console.error("Supabase persistence check failed", String(error&&error.message||error)); }
+  } else {
+    console.warn("Supabase persistence is not configured");
+  }
 });
