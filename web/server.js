@@ -68,6 +68,7 @@ const SCHEMA = {
   properties: {
     title: { type: "string" },
     artist: { type: "string" },
+    capo: { type: "integer", nullable: true },
     key: { type: "string" },
     bpm: { type: "number" },
     duration: { type: "number" },
@@ -127,7 +128,7 @@ const PRIMARY_PROMPT = [
   "For every lyric word provide real start and end seconds on the original audio timeline.",
   "Chord rhythm and density: in a regular 4/4 passage, use one chord event per complete four-beat measure (four regular beats), not one chord per beat. Estimate beat duration from BPM and place the chord at the start of the measure or where the harmony audibly changes. Do not create extra chord changes merely because a beat or lyric word occurs. Only in genuinely exceptional passages where the harmony audibly changes unusually within the measure or clearly departs from the regular four-beat pattern, include the sequence of distinct chords at their actual change times. Treat these exceptions as rare and audio-evidenced, not as a default. If the same chord sustains across measures, do not repeat its label on every beat or word; preserve a new event only when a distinct chord change or meaningful re-entry is heard.",
   "Prefer standard chord names such as Bb, F#m7, Cmaj7, G/B.",
-  "Determine the overall key and BPM when possible.",
+  "Determine the overall key and BPM when possible. Also identify the capo fret used in the recording, if a capo is audible or indicated by the arrangement; return capo as an integer from 0 to 12, using 0 when no capo is used and null only when it cannot be determined. Do not confuse capo position with song key.",
   "Preserve section boundaries such as Intro, Verse, Pre-Chorus, Chorus, Bridge and Outro when they can be inferred.",
   "",
   "Critical chord display rule: place a chord label only ONCE, at the first suitable sung word at or immediately after that chord change. Never repeat the same sustained chord above every subsequent word. Leave chord=null on words while the same chord continues; add a new anchor only when the harmony changes to a different chord. If the same chord returns after a different chord, anchor it again at its new entrance. Keep the complete chord timeline in the chords array independently of word anchors.",
@@ -143,13 +144,26 @@ const VERIFY_PREFIX = [
   "Audit the candidate JSON below and return the COMPLETE corrected object using the supplied schema.",
   "",
   "Correct lyric words or timestamps that do not match the audio.",
-  "Correct chord names and chord change times when the audio disagrees. In regular 4/4 sections, prefer one chord per four-beat measure rather than one per beat; include multiple distinct chords within a measure only for clearly audible exceptional harmonic changes.",
+  "Verify the capo position too: return capo as an integer from 0 to 12, use 0 when no capo is used, and null only when uncertain. Do not confuse capo position with song key. Correct chord names and chord change times when the audio disagrees. In regular 4/4 sections, prefer one chord per four-beat measure rather than one per beat; include multiple distinct chords within a measure only for clearly audible exceptional harmonic changes.",
   "Keep all events chronological and keep all times inside the song duration.",
   "For a chord-to-word anchor, only use a lyric word when the chord starts at or very near that word's start. Place each chord label once per chord event, not on every word where the chord sustains. Leave other words chord=null. If a chord repeats after a different chord, create a fresh anchor. When possible, chordOffset should identify the character index inside the word where the harmonic change lands; otherwise use 0.",
   "Verify coverage from 0 seconds through the exact end of the audio. Include all lyrics and chord events across every section; never return only the first portion due to convenience. If output limits are approached, prioritize complete chronological coverage and concise word-level entries rather than omitting later sections.",
   "Do not invent lyrics. If uncertainty remains, omit unsupported content or use the safer less-specific chord.",
   "Candidate JSON:"
 ].join("\\n");
+
+function metadataFromFilename(filename) {
+  const base = path.basename(String(filename || "")).replace(/\\.[^.]+$/, "").replace(/[._]+/g, " ").replace(/\\s+/g, " ").trim();
+  const parts = base.split(/\\s+(?:-|–|—)\\s+/).map(function(part) { return part.trim(); }).filter(Boolean);
+  if (parts.length >= 2) return { title: parts[0], artist: parts.slice(1).join(" - ") };
+  return { title: base || "שיר ללא שם", artist: "לא צוין בשם הקובץ" };
+}
+function applyFilenameMetadata(analysis, filename) {
+  const metadata = metadataFromFilename(filename);
+  analysis.title = metadata.title;
+  analysis.artist = metadata.artist;
+  return analysis;
+}
 
 function cleanAnalysis(value) {
   const data = value && typeof value === "object" ? value : {};
@@ -202,6 +216,7 @@ function cleanAnalysis(value) {
   return {
     title: String(data.title || ""),
     artist: String(data.artist || ""),
+    capo: data.capo == null || !Number.isFinite(Number(data.capo)) ? null : Math.max(0, Math.min(12, Math.floor(Number(data.capo)))),
     key: String(data.key || ""),
     bpm: Number(data.bpm) || 0,
     duration: duration,
@@ -595,7 +610,7 @@ app.post("/api/verify/:id",async function(req,res){
   if(!session&&!pending.apiKey)return res.status(401).json({error:"יש להתחבר מחדש כדי לאמת את השיר."});
   try{
     logOperation(id,"analysis_verify","האימות הנוסף התחיל לפי בקשת המשתמש");
-    const verified=cleanAnalysis(await analyzeWithGeminiRetry(session,pending.audioBase64,pending.mimeType,VERIFY_PREFIX+"\\n"+JSON.stringify(pending.first),id,"analysis_verify",pending.apiKey));
+    const verified=applyFilenameMetadata(cleanAnalysis(await analyzeWithGeminiRetry(session,pending.audioBase64,pending.mimeType,VERIFY_PREFIX+"\\n"+JSON.stringify(pending.first),id,"analysis_verify",pending.apiKey)),pending.filename);
     pendingVerifications.delete(id);
     logOperation(id,"verification_completed","האימות הסתיים; התוצאה המעודכנת מוכנה","success");
     res.json({analysis:verified,verified:true});
@@ -645,7 +660,7 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");
     const filenameHint = path.basename(req.file.originalname || "");
     const analysisPrompt = PRIMARY_PROMPT + "\\nUploaded filename (identification clue only): " + filenameHint;
-    const first = cleanAnalysis(await analyzeWithGeminiRetry(
+    const first = applyFilenameMetadata(cleanAnalysis(await analyzeWithGeminiRetry(
       session,
       audioBase64,
       mimeType,
@@ -653,9 +668,9 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
       req.operationId,
       "analysis_primary",
       apiKey
-    ));
+    )), filenameHint);
 
-    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,apiKey:apiKey,createdAt:Date.now()});
+    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,apiKey:apiKey,filename:filenameHint,createdAt:Date.now()});
     logOperation(req.operationId,"primary_completed","הניתוח הראשוני הסתיים; דף השיר מוצג וניתן להפעיל אימות נוסף","success");
     res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});
   } catch (error) {
