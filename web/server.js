@@ -19,11 +19,8 @@ app.use(express.json({ limit: "20mb" }));
 
 const sessions = new Map();
 const oauthStates = new Map();
-const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
-const GEMINI_REQUIRED_SCOPES = [
-  "https://www.googleapis.com/auth/cloud-platform",
-  "https://www.googleapis.com/auth/generative-language.retriever"
-];
+const OAUTH_SCOPES = "openid email profile";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
 const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
 
 function cookieToken(req) {
@@ -37,11 +34,22 @@ function setSessionCookie(res, token) {
 }
 function clearSessionCookie(res) { res.setHeader("Set-Cookie", "chord_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"); }
 function requireGoogleOAuth(res) {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_CLOUD_PROJECT) {
-    res.status(503).json({ error: "Google OAuth עדיין לא הוגדר בשרת. חסרים GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET או GOOGLE_CLOUD_PROJECT." });
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    res.status(503).json({ error: "Google OAuth עדיין לא הוגדר בשרת. חסרים GOOGLE_CLIENT_ID או GOOGLE_CLIENT_SECRET." });
     return false;
   }
   return true;
+}
+function requireGeminiApiKey(res) {
+  if (!GEMINI_API_KEY) {
+    res.status(503).json({ error: "שרת Gemini עדיין לא הוגדר. יש להגדיר GEMINI_API_KEY ב-Render. המפתח נשאר בשרת ואינו מוצג למשתמשים." });
+    return false;
+  }
+  return true;
+}
+function geminiClient() {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+  return new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 }
 
 
@@ -234,7 +242,9 @@ app.get("/api/health", function(_req, res) {
     ok: true,
     model: MODEL,
     auth: "google-oauth",
-    googleOAuthConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_CLOUD_PROJECT)
+    googleOAuthConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    geminiConfigured: Boolean(GEMINI_API_KEY),
+    geminiAuth: "server-api-key"
   });
 });
 
@@ -333,78 +343,38 @@ async function refreshGoogleSession(session) {
   return session;
 }
 
-async function geminiFetch(session, url, options) {
-  await refreshGoogleSession(session);
-  if (!Array.isArray(session.grantedScopes) || !GEMINI_REQUIRED_SCOPES.every(function(scope) { return session.grantedScopes.includes(scope); })) {
-    const error = new Error("Google authorization is missing the Gemini API cloud-platform scope. Please sign in with Google again and grant the requested Gemini permission.");
-    error.code = "INSUFFICIENT_SCOPE";
-    throw error;
-  }
-  const headers = Object.assign({}, options && options.headers || {}, {
-    Authorization: "Bearer " + session.accessToken,
-    "x-goog-user-project": process.env.GOOGLE_CLOUD_PROJECT
+async function uploadGeminiFile(filePath, mimeType, displayName) {
+  const ai = geminiClient();
+  const file = await ai.files.upload({
+    file: filePath,
+    config: {
+      mimeType: mimeType || "audio/mpeg",
+      displayName: displayName || "song"
+    }
   });
-  let response = await fetch(url, Object.assign({}, options || {}, { headers }));
-  if (response.status === 401 && session.refreshToken) {
-    session.expiresAt = 0;
-    await refreshGoogleSession(session);
-    headers.Authorization = "Bearer " + session.accessToken;
-    response = await fetch(url, Object.assign({}, options || {}, { headers }));
-  }
-  return response;
+  if (!file || !file.uri) throw new Error("Gemini file upload failed");
+  return file;
 }
 
-async function uploadGeminiFile(session, filePath, mimeType, displayName) {
-  const stat = await fs.stat(filePath);
-  const start = await geminiFetch(session, "https://generativelanguage.googleapis.com/upload/v1beta/files", {
-    method: "POST",
-    headers: {
-      "X-Goog-Upload-Protocol": "resumable",
-      "X-Goog-Upload-Command": "start",
-      "X-Goog-Upload-Header-Content-Length": String(stat.size),
-      "X-Goog-Upload-Header-Content-Type": mimeType,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ file: { display_name: displayName } })
+async function analyzeWithGemini(fileRef, mimeType, prompt) {
+  const ai = geminiClient();
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: [{
+      role: "user",
+      parts: [
+        { text: prompt },
+        { fileData: { fileUri: fileRef.uri, mimeType: mimeType || fileRef.mimeType || "audio/mpeg" } }
+      ]
+    }],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: SCHEMA,
+      thinkingConfig: { thinkingLevel: "high" }
+    }
   });
-  if (!start.ok) throw new Error("Gemini file upload start failed: " + await start.text());
-  const uploadUrl = start.headers.get("x-goog-upload-url");
-  if (!uploadUrl) throw new Error("Gemini did not return an upload URL");
-  const bytes = await fs.readFile(filePath);
-  const finish = await geminiFetch(session, uploadUrl, {
-    method: "POST",
-    headers: {
-      "Content-Length": String(bytes.length),
-      "X-Goog-Upload-Offset": "0",
-      "X-Goog-Upload-Command": "upload, finalize"
-    },
-    body: bytes
-  });
-  const data = await finish.json();
-  if (!finish.ok || !data.file) throw new Error("Gemini file upload failed: " + JSON.stringify(data));
-  return data.file;
-}
-
-async function analyzeWithGeminiOAuth(session, fileUri, mimeType, prompt) {
-  const response = await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }, { fileData: { fileUri: fileUri, mimeType: mimeType } }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: SCHEMA,
-        thinkingConfig: { thinkingLevel: "high" }
-      }
-    })
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error && data.error.message || "Gemini generation failed");
-  const text = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
-    ? data.candidates[0].content.parts.map(function(p) { return p.text || ""; }).join("")
-    : "";
-  if (!text) throw new Error("Gemini returned an empty response");
-  return JSON.parse(text);
+  if (!response.text) throw new Error("Gemini returned an empty response");
+  return JSON.parse(response.text);
 }
 
 app.post("/api/analyze", upload.single("audio"), async function(req, res) {
@@ -412,36 +382,37 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
   if (!requireGoogleOAuth(res)) return;
+  if (!requireGeminiApiKey(res)) return;
   if (!req.file) return res.status(400).json({ error: "לא התקבל קובץ אודיו" });
 
   try {
-    const uploaded = await uploadGeminiFile(session, req.file.path, req.file.mimetype || "audio/mpeg", req.file.originalname || "song");
+    const uploaded = await uploadGeminiFile(req.file.path, req.file.mimetype || "audio/mpeg", req.file.originalname || "song");
     uploadedName = uploaded.name;
 
-    const first = cleanAnalysis(await analyzeWithGeminiOAuth(session, uploaded.uri, uploaded.mimeType || req.file.mimetype, PRIMARY_PROMPT));
-    const verified = cleanAnalysis(await analyzeWithGeminiOAuth(
-      session,
-      uploaded.uri,
+    const first = cleanAnalysis(await analyzeWithGemini(
+      uploaded,
+      uploaded.mimeType || req.file.mimetype,
+      PRIMARY_PROMPT
+    ));
+
+    const verified = cleanAnalysis(await analyzeWithGemini(
+      uploaded,
       uploaded.mimeType || req.file.mimetype,
       VERIFY_PREFIX + "\n" + JSON.stringify(first)
     ));
+
     res.json(verified);
   } catch (error) {
     console.error(error);
-    if (error && (error.code === "INSUFFICIENT_SCOPE" || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(String(error.message || "")))) {
-      const token = cookieToken(req);
-      if (token) sessions.delete(token);
-      clearSessionCookie(res);
-      return res.status(401).json({
-        error: "הרשאת Gemini בחשבון Google חסרה או ישנה. התנתק והתחבר מחדש עם Google כדי לאשר את הרשאת Gemini."
-      });
-    }
     res.status(500).json({ error: error && error.message ? "Gemini: " + error.message : "ניתוח השיר נכשל" });
   } finally {
     try { await fs.unlink(req.file.path); } catch {}
     try {
       if (uploadedName) {
-        try { await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/" + uploadedName, { method: "DELETE" }); } catch {}
+        try {
+          const ai = geminiClient();
+          await ai.files.delete({ name: uploadedName });
+        } catch {}
       }
     } catch {}
   }
