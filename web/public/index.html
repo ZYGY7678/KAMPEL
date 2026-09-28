@@ -31,7 +31,7 @@
 <div class="glow g1"></div><div class="glow g2"></div>
 <header class="top">
 <button class="brand" onclick="goHome()"><span class="logo">♫</span><span><b>Chord Studio</b><small>AI Song Intelligence</small></span></button>
-<div class="top-right"><span class="pill"><i></i>Gemini 3.8 Flash</span><button id="newBtn" class="ghost hidden" onclick="goHome()">שיר חדש</button></div>
+<div class="top-right"><span class="pill"><i></i>Gemini 3.8 Flash</span><span id="account" class="pill">לא מחובר</span><button id="loginBtn" class="primary" onclick="location.href='/auth/google'">G&nbsp; התחברות עם Google</button><button id="logoutBtn" class="ghost hidden" onclick="logoutGoogle()">יציאה</button><button id="newBtn" class="ghost hidden" onclick="goHome()">שיר חדש</button></div>
 </header>
 
 <section id="home" class="main">
@@ -44,7 +44,7 @@
 <div class="drop-icon">♫</div><h3>גרור לכאן את השיר</h3><p>או לחץ כדי לבחור קובץ מהמכשיר</p>
 <div class="formats"><span>MP3</span><span>WAV</span><span>M4A</span><span>FLAC</span><span>OGG</span></div>
 </div>
-<div class="actions"><button class="primary" onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary" onclick="loadDemo()">צפה בדוגמה חיה</button></div>
+<div class="actions"><button id="chooseBtn" class="primary" onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary" onclick="loadDemo()">צפה בדוגמה חיה</button></div>
 <div class="features"><div><b>01</b><span>זיהוי מילים</span></div><div><b>02</b><span>זיהוי אקורדים</span></div><div><b>03</b><span>מיקום לפי זמן</span></div><div><b>04</b><span>Word להורדה</span></div></div>
 </div>
 <div id="homeError" class="error hidden"></div>
@@ -142,7 +142,7 @@ function hide(id){document.getElementById(id).classList.add("hidden")}
 function setError(id,msg){var el=document.getElementById(id);if(msg){el.textContent=msg;show(id)}else hide(id)}
 function goHome(){selectedFile=null;analysis=null;shift=0;simplifyMode="off";if(audioUrl){URL.revokeObjectURL(audioUrl);audioUrl=""}audio.pause();audio.removeAttribute("src");hide("ready");hide("processing");hide("editor");show("home");hide("newBtn");setError("homeError","")}
 function setStage(name){["home","ready","processing","editor"].forEach(function(id){hide(id)});show(name);if(name!=="home")show("newBtn");else hide("newBtn")}
-function pickFile(file){if(!file)return;selectedFile=file;setError("homeError","");audioUrl=URL.createObjectURL(file);setStage("ready");document.getElementById("fileName").textContent=file.name;document.getElementById("fileInfo").textContent=(file.size/1048576).toFixed(1)+" MB · מוכן לניתוח"}
+function pickFile(file){if(!file)return;if(!window.googleAuthenticated){setError("homeError","התחבר קודם עם חשבון Google כדי להשתמש במנוע Gemini");return;}selectedFile=file;setError("homeError","");audioUrl=URL.createObjectURL(file);setStage("ready");document.getElementById("fileName").textContent=file.name;document.getElementById("fileInfo").textContent=(file.size/1048576).toFixed(1)+" MB · מוכן לניתוח"}
 document.getElementById("fileInput").addEventListener("change",function(e){pickFile(e.target.files[0])});
 var drop=document.getElementById("drop");
 drop.addEventListener("dragover",function(e){e.preventDefault();drop.classList.add("hot")});
@@ -150,7 +150,7 @@ drop.addEventListener("dragleave",function(){drop.classList.remove("hot")});
 drop.addEventListener("drop",function(e){e.preventDefault();drop.classList.remove("hot");pickFile(e.dataTransfer.files[0])});
 
 function updateProgress(v){document.getElementById("progressBar").style.width=v+"%";["p1","p2","p3","p4","p5"].forEach(function(id,i){var el=document.getElementById(id);if(v>i*18+8){el.classList.add("on");el.querySelector("b").textContent="✓"}else{el.classList.remove("on");el.querySelector("b").textContent="○"}})}
-async function analyze(){if(!selectedFile)return;setStage("processing");updateProgress(7);var fd=new FormData();fd.append("audio",selectedFile);var v=7;progressTimer=setInterval(function(){v=Math.min(v+6,88);updateProgress(v)},900);try{var r=await fetch("/api/analyze",{method:"POST",body:fd});var data=await r.json();if(!r.ok)throw new Error(data.error||"הניתוח נכשל");analysis=data;shift=0;simplifyMode="off";setStage("editor");renderEditor()}catch(e){setStage("ready");setError("readyError",e.message||"אירעה שגיאה")}finally{clearInterval(progressTimer);updateProgress(100)}}
+async function analyze(){if(!window.googleAuthenticated){setError("readyError","התחבר קודם עם חשבון Google כדי להתחיל את הניתוח");return;}if(!selectedFile)return;setStage("processing");updateProgress(7);var fd=new FormData();fd.append("audio",selectedFile);var v=7;progressTimer=setInterval(function(){v=Math.min(v+6,88);updateProgress(v)},900);try{var r=await fetch("/api/analyze",{method:"POST",body:fd});var data=await r.json();if(!r.ok)throw new Error(data.error||"הניתוח נכשל");analysis=data;shift=0;simplifyMode="off";setStage("editor");renderEditor()}catch(e){setStage("ready");setError("readyError",e.message||"אירעה שגיאה")}finally{clearInterval(progressTimer);updateProgress(100)}}
 function loadDemo(){analysis=DEMO;shift=0;simplifyMode="off";selectedFile=null;audioUrl="";setStage("editor");renderEditor()}
 
 var NOTE_INDEX={C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
@@ -172,6 +172,22 @@ audio.addEventListener("timeupdate",function(){document.getElementById("nowTime"
 audio.addEventListener("play",function(){document.getElementById("playBtn").textContent="Ⅱ"});
 audio.addEventListener("pause",function(){document.getElementById("playBtn").textContent="▶"});
 function exportWord(){if(!analysis)return;fetch("/api/export/docx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({analysis:analysis,shift:shift,simplify:simplifyMode})}).then(async function(r){if(!r.ok){var e=await r.json().catch(function(){return{}});throw new Error(e.error||"ייצוא Word נכשל")}return r.blob()}).then(function(blob){var url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=(analysis.title||"song").replace(/[\\\\/:*?"<>|]/g,"_")+".docx";a.click();URL.revokeObjectURL(url)}).catch(function(e){setError("editorError",e.message||"ייצוא Word נכשל")})}
+async function loadGoogleSession(){
+  try{
+    var r=await fetch("/api/auth/me");
+    var data=await r.json();
+    window.googleAuthenticated=Boolean(data.authenticated);
+    var account=document.getElementById("account"),login=document.getElementById("loginBtn"),logout=document.getElementById("logoutBtn");
+    if(data.authenticated){
+      account.textContent="✓ "+(data.user.email||"Google");
+      login.classList.add("hidden");logout.classList.remove("hidden");
+    }else{
+      account.textContent="לא מחובר";login.classList.remove("hidden");logout.classList.add("hidden");
+    }
+  }catch(e){window.googleAuthenticated=false}
+}
+async function logoutGoogle(){await fetch("/api/auth/logout",{method:"POST"});location.href="/";}
+loadGoogleSession();
 goHome();
 </script>
 </body>
