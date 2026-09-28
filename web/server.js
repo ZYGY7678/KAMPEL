@@ -217,26 +217,6 @@ function cleanAnalysis(value) {
   };
 }
 
-async function analyzeWithGemini(ai, fileUri, mimeType, prompt) {
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: [{
-      role: "user",
-      parts: [
-        { text: prompt },
-        { fileData: { fileUri: fileUri, mimeType: mimeType } }
-      ]
-    }],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: SCHEMA,
-      thinkingConfig: { thinkingLevel: "high" }
-    }
-  });
-  if (!response.text) throw new Error("Gemini returned an empty response");
-  return JSON.parse(response.text);
-}
-
 app.get("/api/health", function(_req, res) {
   res.json({
     ok: true,
