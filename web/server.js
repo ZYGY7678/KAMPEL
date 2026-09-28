@@ -355,6 +355,64 @@ async function geminiFetch(session, url, options) {
   return response;
 }
 
+async function geminiPreflight(session) {
+  const response = await geminiFetch(
+    session,
+    "https://generativelanguage.googleapis.com/v1/models",
+    { method: "GET" }
+  );
+  const raw = await response.text();
+  let data = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch {}
+  const error = data && data.error ? data.error : null;
+  const result = {
+    ok: response.ok,
+    status: response.status,
+    project: process.env.GOOGLE_CLOUD_PROJECT,
+    scopes: Array.isArray(session.grantedScopes) ? session.grantedScopes.slice() : [],
+    errorCode: error && error.code ? error.code : null,
+    errorStatus: error && error.status ? error.status : null,
+    errorMessage: error && error.message ? error.message : null
+  };
+  console.info("Gemini preflight", JSON.stringify(result));
+  if (!response.ok) {
+    const e = new Error(error && error.message ? error.message : "Gemini API preflight failed");
+    e.geminiStatus = response.status;
+    e.geminiCode = error && error.status ? error.status : "";
+    throw e;
+  }
+  return data;
+}
+
+async function geminiModelPreflight(session) {
+  const encodedModel = encodeURIComponent(MODEL);
+  const response = await geminiFetch(
+    session,
+    "https://generativelanguage.googleapis.com/v1beta/models/" + encodedModel,
+    { method: "GET" }
+  );
+  const raw = await response.text();
+  let data = null;
+  try { data = raw ? JSON.parse(raw) : null; } catch {}
+  const error = data && data.error ? data.error : null;
+  const result = {
+    ok: response.ok,
+    status: response.status,
+    model: MODEL,
+    errorCode: error && error.code ? error.code : null,
+    errorStatus: error && error.status ? error.status : null,
+    errorMessage: error && error.message ? error.message : null
+  };
+  console.info("Gemini model preflight", JSON.stringify(result));
+  if (!response.ok) {
+    const e = new Error(error && error.message ? error.message : "Gemini model preflight failed");
+    e.geminiStatus = response.status;
+    e.geminiCode = error && error.status ? error.status : "";
+    throw e;
+  }
+  return data;
+}
+
 async function uploadGeminiFile(session, filePath, mimeType, displayName) {
   const stat = await fs.stat(filePath);
   const start = await geminiFetch(session, "https://generativelanguage.googleapis.com/upload/v1beta/files", {
@@ -414,6 +472,35 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
   return JSON.parse(text);
 }
 
+app.get("/api/gemini-diagnostic", async function(req, res) {
+  const session = authSession(req);
+  if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני בדיקת Gemini." });
+  if (!requireGoogleOAuth(res)) return;
+  try {
+    const models = await geminiPreflight(session);
+    const model = await geminiModelPreflight(session);
+    res.json({
+      ok: true,
+      project: process.env.GOOGLE_CLOUD_PROJECT,
+      scopes: Array.isArray(session.grantedScopes) ? session.grantedScopes.slice() : [],
+      model: MODEL,
+      modelName: model && model.name ? model.name : null,
+      modelSupportedGenerationMethods: model && model.supportedGenerationMethods ? model.supportedGenerationMethods : [],
+      modelListCount: models && Array.isArray(models.models) ? models.models.length : null
+    });
+  } catch (error) {
+    console.error("Gemini diagnostic failed", error);
+    res.status(502).json({
+      ok: false,
+      project: process.env.GOOGLE_CLOUD_PROJECT,
+      model: MODEL,
+      status: error && error.geminiStatus ? error.geminiStatus : null,
+      code: error && error.geminiCode ? error.geminiCode : null,
+      error: error && error.message ? error.message : "Gemini diagnostic failed"
+    });
+  }
+});
+
 app.post("/api/analyze", upload.single("audio"), async function(req, res) {
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
@@ -426,6 +513,8 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
   try {
     const stat = await fs.stat(req.file.path);
     console.info("Audio upload received", JSON.stringify({ size: stat.size, mimeType: req.file.mimetype || "audio/mpeg", originalName: path.basename(req.file.originalname || "audio") }));
+    await geminiPreflight(session);
+    await geminiModelPreflight(session);
     if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if (stat.size > INLINE_AUDIO_MAX_BYTES) {
       return res.status(413).json({
@@ -454,7 +543,11 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
 
     res.json(verified);
   } catch (error) {
-    console.error(error);
+    console.error("Gemini analysis failed", JSON.stringify({
+      status: error && error.geminiStatus ? error.geminiStatus : null,
+      code: error && error.geminiCode ? error.geminiCode : null,
+      message: error && error.message ? error.message : String(error)
+    }));
     if (error && (error.code === "INSUFFICIENT_SCOPE" || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(String(error.message || "")))) {
       const token = cookieToken(req);
       if (token) sessions.delete(token);
