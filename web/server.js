@@ -49,7 +49,8 @@ const SCHEMA = {
                 text: { type: "string" },
                 start: { type: "number" },
                 end: { type: "number" },
-                chord: { type: ["string", "null"] }
+                chord: { type: ["string", "null"] },
+                chordOffset: { type: ["integer", "null"] }
               },
               required: ["id", "text", "start", "end", "chord"]
             }
@@ -102,7 +103,7 @@ const VERIFY_PREFIX = [
   "Correct lyric words or timestamps that do not match the audio.",
   "Correct chord names and chord change times when the audio disagrees.",
   "Keep all events chronological and keep all times inside the song duration.",
-  "For a chord-to-word anchor, only use a lyric word when the chord starts at or very near that word's start.",
+  "For a chord-to-word anchor, only use a lyric word when the chord starts at or very near that word's start. When possible, chordOffset should identify the character index inside the word where the harmonic change lands; otherwise use 0.",
   "Do not invent lyrics. If uncertainty remains, omit unsupported content or use the safer less-specific chord.",
   "Candidate JSON:"
 ].join("\\n");
@@ -128,7 +129,8 @@ function cleanAnalysis(value) {
           text: String(w.text || "").trim(),
           start: start,
           end: end,
-          chord: w.chord == null ? null : String(w.chord).trim() || null
+          chord: w.chord == null ? null : String(w.chord).trim() || null,
+            chordOffset: w.chordOffset == null ? null : Math.max(0, Math.floor(Number(w.chordOffset) || 0))
         };
       })
     };
@@ -299,8 +301,8 @@ function simplifyChord(chord, mode) {
 }
 
 function transformChord(chord, shift, mode) {
-  if (mode !== "off") return simplifyChord(chord, mode);
-  return transposeChord(chord, shift);
+  const shifted = transposeChord(chord, shift);
+  return mode === "off" || mode === "advanced" ? shifted : simplifyChord(shifted, mode);
 }
 
 function lineWordsForExport(line, shift, mode) {
