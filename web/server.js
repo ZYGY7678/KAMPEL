@@ -51,6 +51,7 @@ const upload = multer({
 });
 
 const MODEL = "gemini-3.8-flash";
+const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
 const SCHEMA = {
   type: "object",
@@ -385,12 +386,18 @@ async function uploadGeminiFile(session, filePath, mimeType, displayName) {
   return data.file;
 }
 
-async function analyzeWithGeminiOAuth(session, fileUri, mimeType, prompt) {
+async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt) {
   const response = await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }, { fileData: { fileUri: fileUri, mimeType: mimeType } }] }],
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: audioBase64 } }
+        ]
+      }],
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
@@ -408,23 +415,38 @@ async function analyzeWithGeminiOAuth(session, fileUri, mimeType, prompt) {
 }
 
 app.post("/api/analyze", upload.single("audio"), async function(req, res) {
-  let uploadedName = null;
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
   if (!requireGoogleOAuth(res)) return;
   if (!req.file) return res.status(400).json({ error: "לא התקבל קובץ אודיו" });
 
   try {
-    const uploaded = await uploadGeminiFile(session, req.file.path, req.file.mimetype || "audio/mpeg", req.file.originalname || "song");
-    uploadedName = uploaded.name;
+    const stat = await fs.stat(req.file.path);
+    if (stat.size > INLINE_AUDIO_MAX_BYTES) {
+      return res.status(413).json({
+        error: "הקובץ גדול מדי למצב Google OAuth ללא מפתח Gemini. כרגע נתמכים קבצי אודיו עד 14MB."
+      });
+    }
 
-    const first = cleanAnalysis(await analyzeWithGeminiOAuth(session, uploaded.uri, uploaded.mimeType || req.file.mimetype, PRIMARY_PROMPT));
-    const verified = cleanAnalysis(await analyzeWithGeminiOAuth(
+    // Gemini's standard Files API upload endpoint rejects the user OAuth bearer
+    // token used by this app. Send small audio inline to generateContent instead.
+    const audioBase64 = (await fs.readFile(req.file.path)).toString("base64");
+    const mimeType = req.file.mimetype || "audio/mpeg";
+
+    const first = cleanAnalysis(await analyzeWithGeminiOAuthInline(
       session,
-      uploaded.uri,
-      uploaded.mimeType || req.file.mimetype,
+      audioBase64,
+      mimeType,
+      PRIMARY_PROMPT
+    ));
+
+    const verified = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+      session,
+      audioBase64,
+      mimeType,
       VERIFY_PREFIX + "\n" + JSON.stringify(first)
     ));
+
     res.json(verified);
   } catch (error) {
     console.error(error);
@@ -439,11 +461,6 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
     res.status(500).json({ error: error && error.message ? "Gemini: " + error.message : "ניתוח השיר נכשל" });
   } finally {
     try { await fs.unlink(req.file.path); } catch {}
-    try {
-      if (uploadedName) {
-        try { await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/" + uploadedName, { method: "DELETE" }); } catch {}
-      }
-    } catch {}
   }
 });
 
