@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07111f">
+<meta name="description" content="Chord Studio — זיהוי מילים ואקורדים, שינוי טון, פישוט וייצוא Word">
+<title>Chord Studio</title>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
+:root{color-scheme:dark;font-family:Heebo,system-ui,sans-serif;background:#06101d;color:#edf5ff;--line:rgba(180,210,238,.12);--muted:#8da1b8;--cyan:#67d8d2;--blue:#64c8ff}
+*{box-sizing:border-box}body{margin:0;min-width:320px;background:radial-gradient(circle at 80% 20%,rgba(48,116,176,.18),transparent 35%),radial-gradient(circle at 15% 75%,rgba(27,166,157,.11),transparent 32%),#06101d}button{font:inherit;cursor:pointer}
+.app{min-height:100vh;overflow:hidden;position:relative}.glow{position:fixed;width:420px;height:420px;border-radius:50%;filter:blur(110px);opacity:.14;pointer-events:none}.g1{right:-220px;top:-160px;background:#47bfff}.g2{left:-220px;bottom:-180px;background:#45e0c5}
+.top{height:76px;padding:0 5vw;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;background:rgba(5,15,27,.72);backdrop-filter:blur(18px)}.brand{border:0;background:none;color:inherit;display:flex;align-items:center;gap:11px}.logo{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(145deg,#183d58,#0c2033);border:1px solid rgba(103,216,210,.2);font-size:21px}.brand b{font:700 17px "Space Grotesk"}.brand small{display:block;font-size:10px;color:#70869d}.top-right{display:flex;gap:10px;align-items:center}.pill{padding:8px 12px;border-radius:999px;border:1px solid var(--line);color:#a9bfd3;background:rgba(255,255,255,.02);font-size:11px}.pill i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#65e5c8;box-shadow:0 0 12px #65e5c8;margin-left:7px}
+.main{max-width:1160px;margin:auto;padding:60px 20px 80px}.center{min-height:calc(100vh - 76px);display:grid;place-items:center;padding:36px 20px}.hero{text-align:center}.eyebrow{display:inline-flex;gap:7px;align-items:center;padding:7px 12px;border-radius:999px;background:rgba(103,216,210,.06);border:1px solid rgba(103,216,210,.18);color:#a8d8d5;font-size:12px}.hero h1{font-size:clamp(53px,8vw,94px);line-height:.94;letter-spacing:-.06em;margin:25px 0 19px;font-weight:800}.hero h1 span{background:linear-gradient(90deg,#f4f8ff,#8bdcff,#74e5d4);-webkit-background-clip:text;color:transparent}.hero p{max-width:690px;margin:auto;color:#9eb2c7;font-size:17px;line-height:1.75}.drop{max-width:720px;margin:37px auto 16px;border:1px dashed rgba(112,187,229,.32);border-radius:25px;background:linear-gradient(180deg,rgba(18,39,62,.72),rgba(7,18,31,.68));padding:42px 24px;transition:.2s}.drop.hot,.drop:hover{border-color:rgba(100,200,255,.75);box-shadow:0 18px 70px rgba(39,131,184,.13)}.drop-icon{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;margin:auto auto 15px;background:#102b42;border:1px solid rgba(100,200,255,.18);font-size:25px;color:#75d3ff}.drop h3{margin:0;font-size:22px}.drop p{margin:5px 0 14px;font-size:13px;color:#7f94ab}.formats{display:flex;gap:7px;justify-content:center}.formats span{font-size:9px;padding:5px 8px;border-radius:7px;color:#8fa5ba;background:rgba(255,255,255,.03)}.actions{display:flex;justify-content:center;gap:9px}.primary,.secondary,.ghost,.export{border-radius:12px;padding:12px 16px}.primary,.export{border:0;background:linear-gradient(135deg,#65d3ff,#70e2d2);color:#03111c;font-weight:800;box-shadow:0 10px 30px rgba(82,210,225,.14)}.secondary,.ghost{border:1px solid var(--line);background:rgba(255,255,255,.025);color:#c6d7e8}.features{max-width:760px;margin:50px auto 0;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.features div{padding:16px;border-left:1px solid var(--line)}.features div:last-child{border-left:0}.features b{display:block;color:#597087;font-size:10px}.features span{font-size:12px;color:#a4b7c9}
+.card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(14,31,50,.76),rgba(7,18,31,.71));box-shadow:0 20px 70px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.03);backdrop-filter:blur(18px)}.ready{width:min(820px,100%);padding:23px;border-radius:23px;display:flex;align-items:center;gap:18px}.ready .drop-icon{margin:0}.ready-meta{flex:1;min-width:0}.ready-meta label{color:#71859b;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.ready-meta h2{margin:4px 0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ready-meta p{margin:0;color:#7f95aa;font-size:12px}.ready-actions{display:flex;gap:8px}
+.process{width:min(650px,100%);padding:45px;border-radius:28px;text-align:center}.orb{width:90px;height:90px;border-radius:50%;display:grid;place-items:center;margin:auto auto 20px;background:radial-gradient(circle,#163b58,#0b1d31);border:1px solid rgba(105,209,255,.24);font-size:27px;box-shadow:0 0 75px rgba(75,193,255,.16)}.process h2{margin:0;font-size:31px}.process p{color:#8398ad}.progress{height:6px;border-radius:99px;background:#102638;overflow:hidden;margin:25px 0}.progress i{display:block;height:100%;background:linear-gradient(90deg,#5fc8ff,#70e0d5);transition:.4s}.pipeline{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.pipeline div{font-size:9px;color:#5e758c}.pipeline .on{color:#a4ced9}.pipeline b{display:block;font-weight:500;margin-bottom:5px}
+.editor{max-width:1320px;margin:auto;padding:18px 20px 70px}.song-head{display:flex;align-items:center;justify-content:space-between;padding:22px;border-radius:21px}.song-head label{color:#70859b;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.song-head h1{font-size:31px;letter-spacing:-.035em;margin:3px 0}.song-head p{margin:0;color:#879caf}.head-actions{display:flex;gap:8px}
+.toolbar{margin-top:11px;padding:13px 15px;border-radius:18px;display:flex;justify-content:space-between;align-items:center;gap:17px;flex-wrap:wrap}.tool{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.tool label{font-size:10px;color:#72879b}.step{display:flex;overflow:hidden;border:1px solid var(--line);border-radius:10px}.step button,.step b{height:34px;min-width:35px;border:0;background:transparent;color:#d9e8f6;display:grid;place-items:center}.step b{border-left:1px solid var(--line);border-right:1px solid var(--line);font-size:11px}.presets{display:flex;gap:5px}.presets button,.segment button{border:1px solid var(--line);background:rgba(255,255,255,.025);color:#8fa5ba;border-radius:8px;padding:6px 9px;font-size:10px}.presets .sel,.segment .sel{background:rgba(100,200,255,.12);color:#d4f0ff;border-color:rgba(100,200,255,.32)}.segment{display:flex;gap:5px}
+.player{margin-top:11px;padding:13px 14px;border-radius:19px;display:flex;align-items:center;gap:12px}.play{width:42px;height:42px;border-radius:50%;border:1px solid rgba(101,211,255,.26);background:rgba(101,211,255,.08);color:#8fdcff}.player-main{flex:1}.times{display:flex;justify-content:space-between;font-size:9px;color:#70879e;margin-bottom:5px}.wave{height:36px;display:flex;align-items:center;gap:3px;position:relative;cursor:pointer}.wave span{width:3px;border-radius:5px;background:#3f5d76;opacity:.78}.playhead{position:absolute;top:0;height:36px;width:2px;background:#70e2d5;box-shadow:0 0 17px rgba(112,226,213,.7)}.now{min-width:55px;text-align:center;font:700 14px "Space Grotesk";color:#71d9d4}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:11px;margin-top:11px}.lyrics{border-radius:23px;overflow:hidden;min-height:640px}.paper-head{height:56px;padding:0 24px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--line);color:#a8bed1}.paper-head strong{color:#67d8d2;font-size:19px}.paper-head small{margin-right:auto;color:#7289a0}.lyrics-body{padding:35px 50px}.line{padding:10px 0;border-radius:10px;cursor:pointer}.line:hover,.line.active{background:rgba(100,200,255,.035)}.section{min-height:12px;color:#5f778e;font-size:9px;letter-spacing:.08em}.words{display:flex;flex-wrap:wrap;gap:0 11px;align-items:flex-end}.word-wrap{display:inline-flex;flex-direction:column;min-width:max-content}.chord{height:18px;color:#67d8d2;font:700 13px "Space Grotesk"}.chord.empty{visibility:hidden}.word{font-size:25px;color:#edf5ff}.paper-foot{border-top:1px solid var(--line);padding:12px 24px;color:#50687f;font-size:9px}
+.side{display:flex;flex-direction:column;gap:11px}.side .card{border-radius:17px;padding:16px}.label{font-size:9px;color:#71869a;text-transform:uppercase;letter-spacing:.08em}.score{display:flex;align-items:end;gap:7px;margin:8px 0}.score b{font:700 29px "Space Grotesk"}.score span{color:#6f879d;font-size:9px}.meter{height:5px;border-radius:99px;background:#102538;overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,#64c7f7,#6bdfd4)}.side p{font-size:10px;color:#8095a9;line-height:1.65;margin:10px 0 0}.title-row{display:flex;justify-content:space-between;color:#b9c9d9;font-size:11px}.title-row small{color:#6d8399}.chords{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:9px}.chords button{border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:8px;padding:7px 4px;color:#86a2b8}.chords b{display:block;color:#c9e9eb;font:700 12px "Space Grotesk"}.chords small{font-size:8px;color:#5b7389}
+.error{max-width:750px;margin:14px auto 0;border:1px solid rgba(255,108,108,.23);background:rgba(116,26,26,.18);color:#ffc0c0;padding:11px 13px;border-radius:11px;text-align:center;font-size:12px}.hidden{display:none!important}
+@media(max-width:900px){.workspace{grid-template-columns:1fr}.side{display:grid;grid-template-columns:1fr 1fr}.side .tips{grid-column:1/-1}.song-head{gap:14px}.lyrics-body{padding:28px 26px}}
+@media(max-width:650px){.top{padding:0 15px}.pill{display:none}.main{padding:47px 15px 70px}.hero h1{font-size:57px}.hero p{font-size:14px}.actions{flex-direction:column}.primary,.secondary{width:100%}.features{grid-template-columns:1fr 1fr}.features div{border-left:0;border-bottom:1px solid var(--line)}.ready{flex-direction:column;text-align:center}.ready-actions{width:100%;flex-direction:column}.editor{padding:15px}.song-head{align-items:flex-start;flex-direction:column}.head-actions{width:100%}.export{flex:1}.toolbar{align-items:flex-start}.tool{width:100%}.player .now{display:none}.side{display:flex}.lyrics-body{padding:23px 16px}.word{font-size:21px}.words{gap:0 8px}}
+@media print{.top,.toolbar,.player,.side,.head-actions,.glow{display:none!important}.editor{padding:0}.lyrics{border:0;background:#fff;box-shadow:none}.word{color:#111}.chord{color:#1c716e}}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="glow g1"></div><div class="glow g2"></div>
+<header class="top">
+<button class="brand" onclick="goHome()"><span class="logo">♫</span><span><b>Chord Studio</b><small>AI Song Intelligence</small></span></button>
+<div class="top-right"><span class="pill"><i></i>Gemini 3.8 Flash</span><button id="newBtn" class="ghost hidden" onclick="goHome()">שיר חדש</button></div>
+</header>
+
+<section id="home" class="main">
+<div class="hero">
+<div class="eyebrow">✦ אקורדים ומילים מתוך האודיו שלך</div>
+<h1>העלה שיר.<br><span>קבל דף נגינה.</span></h1>
+<p>מילים, אקורדים, תזמון, שינוי טון ופישוט — מסודרים יחד בצורה נקייה ומוכנה לנגינה.</p>
+<div id="drop" class="drop">
+<input id="fileInput" type="file" accept="audio/*" hidden>
+<div class="drop-icon">♫</div><h3>גרור לכאן את השיר</h3><p>או לחץ כדי לבחור קובץ מהמכשיר</p>
+<div class="formats"><span>MP3</span><span>WAV</span><span>M4A</span><span>FLAC</span><span>OGG</span></div>
+</div>
+<div class="actions"><button class="primary" onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary" onclick="loadDemo()">צפה בדוגמה חיה</button></div>
+<div class="features"><div><b>01</b><span>זיהוי מילים</span></div><div><b>02</b><span>זיהוי אקורדים</span></div><div><b>03</b><span>מיקום לפי זמן</span></div><div><b>04</b><span>Word להורדה</span></div></div>
+</div>
+<div id="homeError" class="error hidden"></div>
+</section>
+
+<section id="ready" class="center hidden">
+<div style="width:min(820px,100%)">
+<div class="card ready">
+<div class="drop-icon">♫</div>
+<div class="ready-meta"><label>קובץ נבחר</label><h2 id="fileName"></h2><p id="fileInfo"></p></div>
+<div class="ready-actions"><button class="primary" onclick="analyze()">✨ נתח את השיר</button><button class="ghost" onclick="goHome()">החלף קובץ</button></div>
+</div>
+<div id="readyError" class="error hidden"></div>
+</div>
+</section>
+
+<section id="processing" class="center hidden">
+<div class="card process">
+<div class="orb">♫</div><h2>מנתח את השיר…</h2><p>Gemini 3.8 בונה שכבות של מילים, תזמון ואקורדים</p>
+<div class="progress"><i id="progressBar" style="width:5%"></i></div>
+<div class="pipeline"><div id="p1"><b>○</b>טעינת אודיו</div><div id="p2"><b>○</b>זיהוי מילים</div><div id="p3"><b>○</b>זיהוי אקורדים</div><div id="p4"><b>○</b>אימות ותזמון</div><div id="p5"><b>○</b>בניית דף</div></div>
+</div>
+</section>
+
+<section id="editor" class="editor hidden">
+<section class="card song-head">
+<div><label>דף שיר</label><h1 id="songTitle"></h1><p id="songMeta"></p></div>
+<div class="head-actions"><button class="export" onclick="exportWord()">⬇ הורד Word</button><button class="ghost" onclick="window.print()">⎙</button></div>
+</section>
+
+<section class="card toolbar">
+<div class="tool"><label>שינוי טון</label><div class="step"><button onclick="shiftTone(-1)">−</button><b id="shiftValue">0</b><button onclick="shiftTone(1)">＋</button></div><div id="presets" class="presets"></div></div>
+<div class="tool"><label>פישוט אקורדים</label><div class="segment"><button data-mode="off" onclick="setSimplify('off')">מקורי</button><button data-mode="simple" onclick="setSimplify('simple')">פשוט</button><button data-mode="medium" onclick="setSimplify('medium')">בינוני</button><button data-mode="advanced" onclick="setSimplify('advanced')">מתקדם</button></div></div>
+</section>
+
+<section class="card player">
+<button id="playBtn" class="play" onclick="togglePlay()">▶</button>
+<div class="player-main"><div class="times"><span id="nowTime">00:00</span><span id="totalTime">00:00</span></div><div id="wave" class="wave"></div></div>
+<div id="nowChord" class="now">—</div>
+<audio id="audio"></audio>
+</section>
+
+<section class="workspace">
+<div class="card lyrics"><div class="paper-head"><strong>♫</strong><span id="paperTitle"></span><small id="paperKey"></small></div><div id="lyricsBody" class="lyrics-body"></div><div class="paper-foot">נוצר באמצעות Chord Studio · Gemini 3.8 Flash</div></div>
+<aside class="side">
+<div class="card"><span class="label">דיוק ותזמון</span><div class="score"><b id="confidence">—</b><span>confidence</span></div><div class="meter"><i id="confidenceMeter" style="width:0%"></i></div><p>האקורדים מוצמדים למילים לפי זמני התחלה, עם שכבת אימות נוספת לפני ההצגה.</p></div>
+<div class="card"><div class="title-row"><span>רצף אקורדים</span><small id="chordCount">0</small></div><div id="chordList" class="chords"></div></div>
+<div class="card tips"><span class="label">טיפים לנגינה</span><p>למתחילים מומלץ לבחור <b>פשוט</b>. שינוי הטון משפיע על שמות האקורדים בלבד והמיקום נשאר זהה.</p></div>
+</aside>
+</section>
+<div id="editorError" class="error hidden"></div>
+</section>
+</div>
+
+<script>
+var selectedFile = null;
+var audioUrl = "";
+var analysis = null;
+var shift = 0;
+var simplifyMode = "off";
+var progressTimer = null;
+var audio = document.getElementById("audio");
+
+var DEMO = {
+  title:"שיר לדוגמה", artist:"Chord Studio", key:"Am", bpm:92, duration:42, confidence:.92, detectedLanguage:"he",
+  lines:[
+    {id:"1",section:"Verse",words:[
+      {id:"1-1",text:"כשהשמש",start:1.8,end:3.1,chord:"Am"},
+      {id:"1-2",text:"עולה",start:3.1,end:4.0,chord:null},
+      {id:"1-3",text:"בבוקר",start:4.0,end:5.0,chord:"F"},
+      {id:"1-4",text:"על",start:5.0,end:5.5,chord:null},
+      {id:"1-5",text:"העיר",start:5.5,end:6.7,chord:"C"}]},
+    {id:"2",section:"Verse",words:[
+      {id:"2-1",text:"אני",start:8.4,end:9.0,chord:"G"},
+      {id:"2-2",text:"יוצא",start:9.0,end:10.0,chord:null},
+      {id:"2-3",text:"לדרך",start:10.0,end:11.2,chord:"Am"},
+      {id:"2-4",text:"ולא",start:11.2,end:12.0,chord:null},
+      {id:"2-5",text:"מסתכל",start:12.0,end:13.4,chord:"F"}]},
+    {id:"3",section:"Chorus",words:[
+      {id:"3-1",text:"וכל",start:16.0,end:16.8,chord:"C"},
+      {id:"3-2",text:"מה",start:16.8,end:17.3,chord:null},
+      {id:"3-3",text:"שרציתי",start:17.3,end:18.7,chord:"G"},
+      {id:"3-4",text:"כבר",start:18.7,end:19.4,chord:null},
+      {id:"3-5",text:"כאן",start:19.4,end:20.4,chord:"Am"}]}
+  ],
+  chords:[
+    {start:1.8,end:4,chord:"Am"},{start:4,end:5.5,chord:"F"},{start:5.5,end:7.8,chord:"C"},
+    {start:8.4,end:10,chord:"G"},{start:10,end:12,chord:"Am"},{start:12,end:14.8,chord:"F"},
+    {start:16,end:17.3,chord:"C"},{start:17.3,end:18.7,chord:"G"},{start:18.7,end:20.4,chord:"Am"}
+  ]
+};
+
+function show(id){document.getElementById(id).classList.remove("hidden")}
+function hide(id){document.getElementById(id).classList.add("hidden")}
+function setError(id,msg){var el=document.getElementById(id);if(msg){el.textContent=msg;show(id)}else hide(id)}
+function goHome(){selectedFile=null;analysis=null;shift=0;simplifyMode="off";if(audioUrl){URL.revokeObjectURL(audioUrl);audioUrl=""}audio.pause();audio.removeAttribute("src");hide("ready");hide("processing");hide("editor");show("home");hide("newBtn");setError("homeError","")}
+function setStage(name){["home","ready","processing","editor"].forEach(function(id){hide(id)});show(name);if(name!=="home")show("newBtn");else hide("newBtn")}
+function pickFile(file){if(!file)return;selectedFile=file;setError("homeError","");audioUrl=URL.createObjectURL(file);setStage("ready");document.getElementById("fileName").textContent=file.name;document.getElementById("fileInfo").textContent=(file.size/1048576).toFixed(1)+" MB · מוכן לניתוח"}
+document.getElementById("fileInput").addEventListener("change",function(e){pickFile(e.target.files[0])});
+var drop=document.getElementById("drop");
+drop.addEventListener("dragover",function(e){e.preventDefault();drop.classList.add("hot")});
+drop.addEventListener("dragleave",function(){drop.classList.remove("hot")});
+drop.addEventListener("drop",function(e){e.preventDefault();drop.classList.remove("hot");pickFile(e.dataTransfer.files[0])});
+
+function updateProgress(v){document.getElementById("progressBar").style.width=v+"%";["p1","p2","p3","p4","p5"].forEach(function(id,i){var el=document.getElementById(id);if(v>i*18+8){el.classList.add("on");el.querySelector("b").textContent="✓"}else{el.classList.remove("on");el.querySelector("b").textContent="○"}})}
+async function analyze(){if(!selectedFile)return;setStage("processing");updateProgress(7);var fd=new FormData();fd.append("audio",selectedFile);var v=7;progressTimer=setInterval(function(){v=Math.min(v+6,88);updateProgress(v)},900);try{var r=await fetch("/api/analyze",{method:"POST",body:fd});var data=await r.json();if(!r.ok)throw new Error(data.error||"הניתוח נכשל");analysis=data;shift=0;simplifyMode="off";setStage("editor");renderEditor()}catch(e){setStage("ready");setError("readyError",e.message||"אירעה שגיאה")}finally{clearInterval(progressTimer);updateProgress(100)}}
+function loadDemo(){analysis=DEMO;shift=0;simplifyMode="off";selectedFile=null;audioUrl="";setStage("editor");renderEditor()}
+
+var NOTE_INDEX={C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+var SHARP=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"], FLAT=["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
+function transposeChord(chord,n){var raw=String(chord||"");if(!raw)return "";var parts=raw.split("/");var m=parts[0].match(/^([A-G](?:#|b)?)(.*)$/);if(!m||NOTE_INDEX[m[1]]==null)return raw;var notes=n<0?FLAT:SHARP;var out=notes[((NOTE_INDEX[m[1]]+n)%12+12)%12]+m[2];if(parts[1]){var b=parts[1].match(/^([A-G](?:#|b)?)(.*)$/);if(b&&NOTE_INDEX[b[1]]!=null)out+="/"+notes[((NOTE_INDEX[b[1]]+n)%12+12)%12]+b[2]}return out}
+function simplifyChord(chord,mode){var raw=String(chord||"");if(!raw||mode==="off"||mode==="advanced")return raw;var slash=raw.indexOf("/");var main=slash>0?raw.slice(0,slash):raw;var bass=slash>0?raw.slice(slash+1):"";var m=main.match(/^([A-G](?:#|b)?)(.*)$/);if(!m)return raw;var suf=m[2];if(mode==="simple"){suf=/^m/i.test(suf)?"m":"";return m[1]+suf}if(/^(maj7|maj9|maj11|maj13|M7|M9|M11|M13|7|9|11|13|add9|add11)$/i.test(suf))suf="";if(/^m(?:7|9|11|13)$/i.test(suf)||/^min(?:7|9|11|13)?$/i.test(suf))suf="m";if(/^(dim7?|°7?|aug|\\+)$/i.test(suf))suf="";return m[1]+suf+(bass?"/"+bass:"")}
+function transformedChord(c){return simplifyMode!=="off"?simplifyChord(c,simplifyMode):transposeChord(c,shift)}
+function chordAt(t){var arr=analysis&&analysis.chords||[];var cur=null;arr.forEach(function(c){if(Number(c.start)<=t)cur=c});return cur?transformedChord(cur.chord):null}
+function renderEditor(){if(!analysis)return;document.getElementById("songTitle").textContent=analysis.title||selectedFile&&selectedFile.name||"שיר ללא שם";var k=analysis.key?transposeChord(analysis.key,shift):"—";document.getElementById("songMeta").textContent=(analysis.artist||"אמן לא זוהה")+" · סולם "+k+(analysis.bpm?" · "+Math.round(analysis.bpm)+" BPM":"");document.getElementById("paperTitle").textContent=analysis.title||"דף שיר";document.getElementById("paperKey").textContent=k;document.getElementById("shiftValue").textContent=(shift>0?"+":"")+shift;document.getElementById("confidence").textContent=analysis.confidence?Math.round(analysis.confidence*100)+"%":"—";document.getElementById("confidenceMeter").style.width=(analysis.confidence?Math.round(analysis.confidence*100):0)+"%";renderPresets();renderLyrics();renderChords();if(audioUrl){audio.src=audioUrl;show("player")}else{audio.removeAttribute("src")}buildWave()}
+function renderPresets(){var box=document.getElementById("presets");box.innerHTML="";[-5,-3,-2,0,2,3,5].forEach(function(n){var b=document.createElement("button");b.textContent=(n>0?"+":"")+n;if(n===shift)b.className="sel";b.onclick=function(){shift=n;renderEditor()};box.appendChild(b)});document.querySelectorAll(".segment button").forEach(function(b){b.classList.toggle("sel",b.dataset.mode===simplifyMode)})}
+function renderLyrics(){var body=document.getElementById("lyricsBody");body.innerHTML="";(analysis.lines||[]).forEach(function(line){var wrap=document.createElement("div");wrap.className="line";wrap.dataset.id=line.id;if(line.section){var sec=document.createElement("div");sec.className="section";sec.textContent=line.section;wrap.appendChild(sec)}var row=document.createElement("div");row.className="words";(line.words||[]).forEach(function(w){var ww=document.createElement("span");ww.className="word-wrap";var cc=document.createElement("span");cc.className="chord";var base=w.chord||null;if(base)cc.textContent=transformedChord(base);if(!base)cc.classList.add("empty");var tx=document.createElement("span");tx.className="word";tx.textContent=w.text;ww.appendChild(cc);ww.appendChild(tx);row.appendChild(ww)});wrap.appendChild(row);wrap.onclick=function(){document.querySelectorAll(".line").forEach(function(x){x.classList.remove("active")});wrap.classList.add("active");if(audio.src&&line.words&&line.words[0])audio.currentTime=Number(line.words[0].start)||0};body.appendChild(wrap)})}
+function renderChords(){var box=document.getElementById("chordList");box.innerHTML="";var arr=analysis.chords||[];document.getElementById("chordCount").textContent=arr.length;arr.slice(0,27).forEach(function(c){var b=document.createElement("button");var strong=document.createElement("b"),small=document.createElement("small");strong.textContent=transformedChord(c.chord);small.textContent=formatTime(c.start);b.appendChild(strong);b.appendChild(small);b.onclick=function(){if(audio.src)audio.currentTime=Number(c.start)||0};box.appendChild(b)})}
+function setSimplify(mode){simplifyMode=mode;renderEditor()}
+function shiftTone(n){shift=Math.max(-12,Math.min(12,shift+n));renderEditor()}
+function formatTime(s){s=Math.max(0,Math.round(Number(s)||0));return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")}
+function buildWave(){var wave=document.getElementById("wave");wave.innerHTML="";for(var i=0;i<58;i++){var s=document.createElement("span");s.style.height=(23+((i*19)%46))+"%";wave.appendChild(s)}var ph=document.createElement("b");ph.className="playhead";ph.id="playhead";wave.appendChild(ph);wave.onclick=function(e){if(!audio.duration)return;var r=wave.getBoundingClientRect();audio.currentTime=((e.clientX-r.left)/r.width)*audio.duration}}
+function togglePlay(){if(!audio.src)return;if(audio.paused)audio.play();else audio.pause()}
+audio.addEventListener("timeupdate",function(){document.getElementById("nowTime").textContent=formatTime(audio.currentTime);var d=audio.duration||analysis&&analysis.duration||0;document.getElementById("totalTime").textContent=formatTime(d);var ph=document.getElementById("playhead");if(ph)ph.style.left=(d?(audio.currentTime/d)*100:0)+"%";document.getElementById("nowChord").textContent=chordAt(audio.currentTime)||"—"});
+audio.addEventListener("play",function(){document.getElementById("playBtn").textContent="Ⅱ"});
+audio.addEventListener("pause",function(){document.getElementById("playBtn").textContent="▶"});
+function exportWord(){if(!analysis)return;fetch("/api/export/docx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({analysis:analysis,shift:shift,simplify:simplifyMode})}).then(async function(r){if(!r.ok){var e=await r.json().catch(function(){return{}});throw new Error(e.error||"ייצוא Word נכשל")}return r.blob()}).then(function(blob){var url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=(analysis.title||"song").replace(/[\\\\/:*?"<>|]/g,"_")+".docx";a.click();URL.revokeObjectURL(url)}).catch(function(e){setError("editorError",e.message||"ייצוא Word נכשל")})}
+goHome();
+</script>
+</body>
+</html>
