@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { GoogleGenAI } from "@google/genai";
+import { parseFile } from "music-metadata";
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from "docx";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -155,17 +156,41 @@ const VERIFY_PREFIX = [
   "Candidate JSON:"
 ].join("\\n");
 
-function metadataFromFilename(filename) {
-  const base = path.basename(String(filename || "")).replace(/\\.[^.]+$/, "").replace(/[._]+/g, " ").replace(/\\s+/g, " ").trim();
-  const parts = base.split(/\\s+(?:-|–|—)\\s+/).map(function(part) { return part.trim(); }).filter(Boolean);
-  if (parts.length >= 2) return { title: parts[0], artist: parts.slice(1).join(" - ") };
-  return { title: base || "שיר ללא שם", artist: "לא צוין בשם הקובץ" };
+function filenameHint(filename) {
+  return path.basename(String(filename || "")).trim();
 }
-function applyFilenameMetadata(analysis, filename) {
-  const metadata = metadataFromFilename(filename);
-  analysis.title = metadata.title;
-  analysis.artist = metadata.artist;
-  return analysis;
+
+async function extractAudioMetadata(filePath) {
+  try {
+    const metadata = await parseFile(filePath, { skipCovers: true });
+    const common = metadata && metadata.common ? metadata.common : {};
+    return {
+      title: String(common.title || "").trim(),
+      artist: String(common.artist || "").trim(),
+      album: String(common.album || "").trim(),
+      albumArtist: String(common.albumartist || "").trim(),
+      track: common.track && common.track.no ? Number(common.track.no) : null,
+      year: common.year ? Number(common.year) : null
+    };
+  } catch (error) {
+    console.warn("Audio metadata read failed", String(error && error.message || error).slice(0, 250));
+    return {};
+  }
+}
+
+function metadataPromptBlock(filename, audioMetadata) {
+  const safeMeta = {
+    filename: filenameHint(filename),
+    embeddedTags: audioMetadata || {}
+  };
+  return [
+    "",
+    "SONG IDENTIFICATION HINTS FROM THE UPLOADED FILE:",
+    JSON.stringify(safeMeta),
+    "Use these file-level hints together with what you hear in the attached audio.",
+    "Identify the actual song title and the actual singer/artist. The embedded tags and filename are clues, not proof: correct them when they conflict with the audio or when they clearly describe a different recording. Do not copy a malformed filename into the title field.",
+    "Return the best-supported title and artist in the analysis.title and analysis.artist fields. Never return placeholder text such as 'שיר ללא שם' when the audio or supplied file metadata gives a usable identification."
+  ].join("\n");
 }
 
 function sectionKind(section) {
@@ -654,7 +679,15 @@ app.post("/api/verify/:id",async function(req,res){
   if(!session&&!pending.apiKey)return res.status(401).json({error:"יש להתחבר מחדש כדי לאמת את השיר."});
   try{
     logOperation(id,"analysis_verify","האימות הנוסף התחיל לפי בקשת המשתמש");
-    const verified=applyFilenameMetadata(cleanAnalysis(await analyzeWithGeminiRetry(session,pending.audioBase64,pending.mimeType,VERIFY_PREFIX+"\\n"+JSON.stringify(pending.first),id,"analysis_verify",pending.apiKey)),pending.filename);
+    const verified=cleanAnalysis(await analyzeWithGeminiRetry(
+      session,
+      pending.audioBase64,
+      pending.mimeType,
+      VERIFY_PREFIX + metadataPromptBlock(pending.filename, pending.audioMetadata) + "\nCandidate JSON:\n" + JSON.stringify(pending.first),
+      id,
+      "analysis_verify",
+      pending.apiKey
+    ));
     pendingVerifications.delete(id);
     logOperation(id,"verification_completed","האימות הסתיים; התוצאה המעודכנת מוכנה","success");
     res.json({analysis:verified,verified:true});
@@ -702,9 +735,11 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     const mimeType = req.file.mimetype || "audio/mpeg";
 
     logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");
-    const filenameHint = path.basename(req.file.originalname || "");
-    const analysisPrompt = PRIMARY_PROMPT + "\\nUploaded filename (identification clue only): " + filenameHint;
-    const first = applyFilenameMetadata(cleanAnalysis(await analyzeWithGeminiRetry(
+    const filenameHintValue = filenameHint(req.file.originalname || "");
+    const audioMetadata = await extractAudioMetadata(req.file.path);
+    logOperation(req.operationId,"metadata_read","נקראו פרטי הקובץ לזיהוי השיר");
+    const analysisPrompt = PRIMARY_PROMPT + metadataPromptBlock(filenameHintValue, audioMetadata);
+    const first = cleanAnalysis(await analyzeWithGeminiRetry(
       session,
       audioBase64,
       mimeType,
@@ -712,9 +747,9 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
       req.operationId,
       "analysis_primary",
       apiKey
-    )), filenameHint);
+    ));
 
-    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,apiKey:apiKey,filename:filenameHint,createdAt:Date.now()});
+    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,apiKey:apiKey,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
     logOperation(req.operationId,"primary_completed","הניתוח הראשוני הסתיים; דף השיר מוצג וניתן להפעיל אימות נוסף","success");
     res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});
   } catch (error) {
