@@ -821,6 +821,27 @@ function transformChord(chord, shift, mode) {
   return mode === "off" || mode === "advanced" ? shifted : simplifyChord(shifted, mode);
 }
 
+function normalizeExportSection(section, state) {
+  const raw = String(section || "").trim();
+  const s = raw.toLowerCase();
+  if (/verse|בית/.test(s)) {
+    const m = raw.match(/(?:verse|בית)\s*(?:no\.\s*)?([0-9]+)/i);
+    if (state.lastKind !== "verse") state.verse += 1;
+    if (m) state.verse = Math.max(state.verse, Number(m[1]) || state.verse);
+    state.lastKind = "verse";
+    const letters = ["א","ב","ג","ד","ה","ו","ז","ח","ט","י","יא","יב","יג","יד","טו"];
+    return letters[state.verse - 1] ? "בית " + letters[state.verse - 1] : "בית " + state.verse;
+  }
+  if (/chorus|refrain|פזמון/.test(s)) { state.lastKind = "chorus"; return "פזמון"; }
+  if (/transition|interlude|turnaround|מעבר|אינטרלוד/.test(s)) { state.lastKind = "transition"; return "מעבר"; }
+  if (/pre[- ]?chorus|קדם[- ]?פזמון/.test(s)) { state.lastKind = "prechorus"; return "קדם־פזמון"; }
+  if (/bridge|גשר/.test(s)) { state.lastKind = "bridge"; return "גשר"; }
+  if (/intro|opening|פתיחה/.test(s)) { state.lastKind = "intro"; return "פתיחה"; }
+  if (/outro|ending|סיום/.test(s)) { state.lastKind = "outro"; return "סיום"; }
+  state.lastKind = "other";
+  return raw.replace(/\bVerse\b/gi, "").trim();
+}
+
 function lineWordsForExport(line, shift, mode) {
   return (line.words || []).map(function(word) {
     return {
@@ -835,15 +856,18 @@ function noBorders() {
   return { top: side, bottom: side, left: side, right: side };
 }
 
-function makeWordTable(words) {
+function makeWordTable(words, fontSize) {
+  const bodySize = Math.max(10, Math.min(48, Number(fontSize) || 24));
+  const chordSize = Math.max(9, bodySize - 5);
   const chordCells = words.map(function(w) {
     return new TableCell({
-      width: { size: Math.max(700, w.text.length * 450), type: WidthType.DXA },
+      width: { size: Math.max(700, w.text.length * Math.max(360, bodySize * 18)), type: WidthType.DXA },
       borders: noBorders(),
       children: [
         new Paragraph({
           alignment: AlignmentType.RIGHT,
-          children: [new TextRun({ text: w.chord || "", font: "Arial", bold: true, size: 18, color: "2A8D88" })]
+          spacing: { after: 0, before: 0 },
+          children: [new TextRun({ text: w.chord || "", font: "Arial", bold: true, size: chordSize * 2, color: "2A8D88" })]
         })
       ]
     });
@@ -851,12 +875,13 @@ function makeWordTable(words) {
 
   const wordCells = words.map(function(w) {
     return new TableCell({
-      width: { size: Math.max(700, w.text.length * 450), type: WidthType.DXA },
+      width: { size: Math.max(700, w.text.length * Math.max(360, bodySize * 18)), type: WidthType.DXA },
       borders: noBorders(),
       children: [
         new Paragraph({
           alignment: AlignmentType.RIGHT,
-          children: [new TextRun({ text: w.text + " ", font: "Arial", size: 24, color: "182433" })]
+          spacing: { after: 0, before: 0 },
+          children: [new TextRun({ text: w.text + " ", font: "Arial", size: bodySize * 2, color: "182433" })]
         })
       ]
     });
@@ -872,12 +897,78 @@ function makeWordTable(words) {
   });
 }
 
+function groupWordsForWordExport(analysis, shift, mode) {
+  const state = { verse: 0, lastKind: "" };
+  const groups = [];
+  let current = null;
+
+  function flush() {
+    if (current && current.words.length) groups.push(current);
+    current = null;
+  }
+
+  for (const line of analysis.lines || []) {
+    const label = normalizeExportSection(line.section, state);
+    const words = (line.words || []).filter(function(w) {
+      return String(w && w.text || "").trim();
+    }).map(function(w) {
+      return {
+        text: String(w.text || "").trim(),
+        chord: w.chord ? transformChord(w.chord, shift, mode) : "",
+        start: Number(w.start) || 0,
+        end: Number(w.end) || Number(w.start) || 0
+      };
+    });
+
+    if (!words.length) {
+      if (label === "מעבר") {
+        flush();
+        groups.push({ section: "מעבר", words: [] });
+      }
+      continue;
+    }
+
+    if (!current || current.section !== label) {
+      flush();
+      current = { section: label, words: [] };
+    }
+
+    current.words.push.apply(current.words, words);
+
+    while (current.words.length > 15) {
+      const candidateMin = 10;
+      const candidateMax = 15;
+      const beat = Number(analysis.bpm) > 0 ? 60 / Number(analysis.bpm) : 0;
+      let cut = 12;
+      if (beat > 0) {
+        let bestScore = Infinity;
+        for (let n = candidateMin; n <= candidateMax; n += 1) {
+          const word = current.words[n - 1];
+          const t = Number(word.end) || Number(word.start) || 0;
+          const distanceToBeat = Math.abs(t - Math.round(t / beat) * beat);
+          const score = distanceToBeat * 10 + Math.abs(n - 12) * 0.15;
+          if (score < bestScore) {
+            bestScore = score;
+            cut = n;
+          }
+        }
+      }
+      groups.push({ section: current.section, words: current.words.splice(0, cut) });
+    }
+  }
+
+  flush();
+
+  return groups;
+}
+
 app.post("/api/export/docx", async function(req, res) {
   try {
     const payload = req.body || {};
     const analysis = payload.analysis;
     const shift = Math.max(-12, Math.min(12, Number(payload.shift) || 0));
     const mode = payload.simplify || "off";
+    const fontSize = Math.max(12, Math.min(36, Number(payload.fontSize) || 24));
     if (!analysis) return res.status(400).json({ error: "חסר נתון ניתוח" });
 
     const key = analysis.key ? transposeChord(analysis.key, shift) : "—";
@@ -885,24 +976,32 @@ app.post("/api/export/docx", async function(req, res) {
 
     children.push(new Paragraph({
       alignment: AlignmentType.RIGHT,
+      spacing: { after: 80 },
       children: [new TextRun({ text: analysis.title || "דף אקורדים", font: "Arial", bold: true, size: 34, color: "102238" })]
     }));
     children.push(new Paragraph({
       alignment: AlignmentType.RIGHT,
+      spacing: { after: 180 },
       children: [new TextRun({
         text: (analysis.artist || "אמן לא זוהה") + " · סולם " + key + (analysis.bpm ? " · " + Math.round(analysis.bpm) + " BPM" : ""),
         font: "Arial", size: 17, color: "667589"
       })]
     }));
 
-    for (const line of analysis.lines || []) {
-      if (line.section) {
+    const groups = groupWordsForWordExport(analysis, shift, mode);
+    let lastSection = "";
+    for (const group of groups) {
+      if (group.section && group.section !== lastSection) {
         children.push(new Paragraph({
           alignment: AlignmentType.RIGHT,
-          children: [new TextRun({ text: line.section, font: "Arial", bold: true, size: 14, color: "6A839B" })]
+          spacing: { before: 140, after: 45 },
+          children: [new TextRun({ text: group.section, font: "Arial", bold: true, size: 14, color: "6A839B" })]
         }));
+        lastSection = group.section;
       }
-      children.push(makeWordTable(lineWordsForExport(line, shift, mode)));
+      if (group.words.length) {
+        children.push(makeWordTable(group.words, fontSize));
+      }
     }
 
     children.push(new Paragraph({
@@ -920,7 +1019,7 @@ app.post("/api/export/docx", async function(req, res) {
     });
 
     const buffer = await Packer.toBuffer(doc);
-    const safe = String(analysis.title || "song").replace(/[\\\\/:*?"<>|]/g, "_") + ".docx";
+    const safe = String(analysis.title || "song").replace(/[\\/:*?"<>|]/g, "_") + ".docx";
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(safe));
     res.send(buffer);
