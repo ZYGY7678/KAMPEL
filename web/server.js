@@ -504,6 +504,11 @@ async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, op
         const status = Number(error && error.geminiStatus) || null;
         const apiCode = String(error && error.geminiCode || "");
         logOperation(operationId, stage + "_api_error", JSON.stringify({model:model,status:status,apiCode:apiCode,message:message.slice(0,500)}), "error");
+        const unavailableModel = status === 404 || apiCode === "NOT_FOUND";
+        if (unavailableModel && modelIndex < MODELS.length - 1) {
+          logOperation(operationId, stage + "_fallback", model + " לא נמצא או אינו זמין (HTTP " + status + "); עובר למודל הבא", "warn");
+          break;
+        }
         const retryable = status === 429 || status === 503 || apiCode === "RESOURCE_EXHAUSTED" || apiCode === "UNAVAILABLE" || /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message);
         if (!retryable) throw error;
         if (attempt < delays.length) {
@@ -582,8 +587,7 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     logOperation(req.operationId,"upload_received","הקובץ התקבל בשרת ("+stat.size+" בתים)","success");
     logOperation(req.operationId,"gemini_preflight","בודק גישה ל־Gemini ולפרויקט Google Cloud");
     await geminiPreflight(session);
-    logOperation(req.operationId,"model_check","בודק זמינות ומאפייני המודל "+MODEL);
-    await geminiModelPreflight(session);
+    logOperation(req.operationId,"model_check","בדיקת הרשאות הושלמה; זמינות כל מודל תיבדק לפי קוד התשובה בזמן הניסיון");
     if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if (stat.size > INLINE_AUDIO_MAX_BYTES) {
       return res.status(413).json({
