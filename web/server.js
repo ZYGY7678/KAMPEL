@@ -403,10 +403,10 @@ async function requireUploadAccess(req,res,options){req.operationId=operationId(
 async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model, operationIdValue, stage, attempt) {
   const startedAt=Date.now();
   logOperation(operationIdValue,"gemini_request_started","נשלחת בקשת ניתוח ל־Gemini; שלב "+stage+", מודל "+model+", ניסיון "+attempt);
-  let response,data;
+  let response,data; const controller=new AbortController(); const timeout=setTimeout(function(){controller.abort();},20000);
   try {
     response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey), {
-      method: "POST",
+      method: "POST", signal:controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: audioBase64 } }] }], generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, thinkingConfig: { thinkingLevel: "high" } } })
     });
@@ -427,9 +427,10 @@ async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, mo
     logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+model+", HTTP "+response.status+", משך "+(Date.now()-startedAt)+"ms");
     return parsed;
   } catch(error) {
+    if(error&&error.name==="AbortError"){const timeoutError=new Error("לא התקבלה תשובה מהמודל בתוך 20 שניות");timeoutError.geminiCode="TIMEOUT";timeoutError.geminiStatus=504;error=timeoutError;}
     logOperation(operationIdValue,"gemini_request_failed","בקשת Gemini נכשלה; שלב "+stage+", מודל "+model+", ניסיון "+attempt+", HTTP "+(error.geminiStatus||"לא התקבל")+", קוד "+(error.geminiCode||"לא ידוע")+", משך "+(Date.now()-startedAt)+"ms, פירוט: "+String(error.message||error).slice(0,350),"error");
     throw error;
-  }
+  } finally { clearTimeout(timeout); }
 }
 
 async function searchLyricEvidence(apiKey,title,artist,language){
@@ -446,26 +447,16 @@ async function searchLyricEvidence(apiKey,title,artist,language){
 
 async function analyzeWithGeminiFallback(apiKeys,audioBase64,mimeType,prompt,operationIdValue,stage){const keys=Array.isArray(apiKeys)&&apiKeys.length?apiKeys:[""];let lastError=null;for(let i=0;i<keys.length;i++){try{return await analyzeWithGeminiRetry(keys[i],audioBase64,mimeType,prompt,operationIdValue,stage);}catch(error){lastError=error;const status=Number(error&&error.geminiStatus)||null,code=String(error&&error.geminiCode||""),message=String(error&&error.message||error),quota=status===429||code==="RESOURCE_EXHAUSTED"||/quota exceeded|resource[_ ]exhausted|rate limit/i.test(message);if(!quota||i===keys.length-1)throw error;logOperation(operationIdValue,"api_key_fallback","המפתח הראשון הגיע למגבלה; מנסים את מפתח ה־API החלופי","info");}}throw lastError||new Error("Gemini analysis failed");}
 async function analyzeWithGeminiRetry(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
- const delays=[2000,5000,10000];let lastError=null;
- for(let modelIndex=0;modelIndex<MODELS.length;modelIndex++){
-  const model=MODELS[modelIndex];
-  for(let attempt=0;;attempt++){
-   try{return await analyzeWithGeminiApiKey(apiKey,audioBase64,mimeType,prompt,model,operationIdValue,stage,attempt+1);}
-   catch(error){
-    lastError=error;const status=Number(error&&error.geminiStatus)||null,code=String(error&&error.geminiCode||""),message=String(error&&error.message||error),notFound=status===404||code==="NOT_FOUND";
-    if(notFound&&modelIndex<MODELS.length-1){logOperation(operationIdValue,"model_fallback","המודל "+model+" אינו זמין; עוברים למודל הבא");break;}
-    const retryable=status===429||status===503||code==="RESOURCE_EXHAUSTED"||code==="UNAVAILABLE"||/high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message);
-    if(!retryable)throw error;
-    const retryHeader=Number(error.retryAfterSeconds)||0,delayMatch=message.match(/retry in\s+([0-9]+(?:\.[0-9]+)?)\s*s/i),wait=Math.max(retryHeader*1000,delayMatch?Number(delayMatch[1])*1000:0,/quota exceeded|generate_content_free_tier_requests/i.test(message)?60000:delays[Math.min(attempt,delays.length-1)]);
-    if(attempt<delays.length){logOperation(operationIdValue,"gemini_retry_scheduled","Gemini החזיר שגיאה זמנית ("+(status||code||"לא ידוע")+"); ניסיון נוסף בעוד "+Math.ceil(wait/1000)+" שניות");await new Promise(function(resolve){setTimeout(resolve,wait)});continue;}
-    if(modelIndex<MODELS.length-1){logOperation(operationIdValue,"model_fallback","מוצו הניסיונות למודל "+model+"; עוברים למודל הבא");break;}
-    throw lastError;
-   }
-  }
+ const fallbackModels=[MODELS[0],MODELS[3],MODELS[4]];let lastError=null;
+ for(let modelIndex=0;modelIndex<fallbackModels.length;modelIndex++){
+  const model=fallbackModels[modelIndex];
+  try{
+   if(modelIndex>0)logOperation(operationIdValue,"model_fallback","לא התקבלה תשובה תקינה מהמודל הקודם; עוברים ישירות ל־"+model,"info");
+   return await analyzeWithGeminiApiKey(apiKey,audioBase64,mimeType,prompt,model,operationIdValue,stage,1);
+  }catch(error){lastError=error;if(modelIndex===fallbackModels.length-1)throw error;}
  }
  throw lastError||new Error("All Gemini models failed");
 }
-
 app.get("/api/gemini-diagnostic",async function(req,res){const session=await authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני בדיקת Gemini."});if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני בדיקת Gemini."});try{const data=await geminiApiKeyPreflight(apiKey),models=data&&Array.isArray(data.models)?data.models:[];res.json({ok:true,model:MODEL,models:models.map(function(item){return{name:item.name,methods:item.supportedGenerationMethods||[]};})});}catch(error){res.status(502).json({ok:false,status:error.geminiStatus||null,code:error.geminiCode||null,apiCode:error.geminiApiCode||null,error:String(error.message||error)});}});
 
 app.post("/api/verify/:id",async function(req,res){const session=await authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim(),id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),pending=pendingVerifications.get(id);if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני האימות."});if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני האימות."});if(!pending)return res.status(404).json({error:"לא נמצאה תוצאת ניתוח זמינה לאימות. הרץ ניתוח ראשוני מחדש."});try{await geminiApiKeyPreflight(apiKey);const verified=cleanAnalysis(await analyzeWithGeminiFallback([apiKey,String(req.headers["x-gemini-api-key-2"]||"").trim()].filter(Boolean),pending.audioBase64,pending.mimeType,VERIFY_PREFIX+metadataPromptBlock(pending.filename,pending.audioMetadata)+"\nCandidate JSON:\n"+JSON.stringify(pending.first),id,"analysis_verify"));if(supabaseReady()&&pending.historyId)await updateAnalysisHistory(pending.historyId,accountIdForUser(session.user),verified);pendingVerifications.delete(id);res.json({analysis:verified,verified:true});}catch(error){res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});}});
