@@ -518,7 +518,8 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
   if (!requireGoogleOAuth(res)) return;
-  if (!req.file) {\n    logOperation(req.operationId,"upload_failed","השרת לא קיבל קובץ בשדה audio","error");
+  if (!req.file) {
+    logOperation(req.operationId,"upload_failed","השרת לא קיבל קובץ בשדה audio","error");
     console.warn("Audio upload missing: multer did not receive field audio");
     return res.status(400).json({ error: "לא התקבל קובץ אודיו. נסה לבחור את הקובץ שוב." });
   }
