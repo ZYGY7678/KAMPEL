@@ -473,7 +473,12 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
     })
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error && data.error.message || "Gemini generation failed");
+  if (!response.ok) {
+    const error = new Error(data.error && data.error.message || "Gemini generation failed");
+    error.geminiStatus = response.status;
+    error.geminiCode = data.error && data.error.status || "";
+    throw error;
+  }
   const text = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
     ? data.candidates[0].content.parts.map(function(p) { return p.text || ""; }).join("")
     : "";
@@ -506,6 +511,7 @@ async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, op
           logOperation(operationId, stage + "_fallback", model + " עדיין לא זמין; עובר למודל הבא");
           break;
         }
+        throw lastError;
       }
     }
   }
