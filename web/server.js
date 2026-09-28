@@ -118,18 +118,20 @@ const SCHEMA = {
 
 const PRIMARY_PROMPT = [
   "You are the music-analysis engine inside a professional song-to-chords-and-lyrics editor.",
-  "Analyze the attached full song audio as precisely as possible.",
+  "Analyze the entire attached audio from the first audible sample to the final audible sample. Do not analyze only a preview or the opening section.",
+  "The uploaded filename is provided separately as a clue for identifying the song title and artist. Use it carefully; do not treat an unverified filename as proof and do not invent metadata.",
   "Return ONLY structured JSON matching the supplied schema.",
   "",
-  "Transcribe the lyrics faithfully in the sung language. Do not invent missing words.",
+  "Transcribe the lyrics faithfully in the sung language across the COMPLETE recording, including every verse, chorus, bridge, repeated section, intro/outro vocal, and ending. Do not stop after the first section and do not summarize or omit repeated lyrics. Continue scanning sequentially until the audio ends; preserve the original order. If a section is unclear, mark only the uncertain words as omitted rather than dropping the rest of the song.",
+  "Return all detected lyric lines and chord events for the full duration. Ensure the final word and final chord events are covered through the end of the recording.",
   "For every lyric word provide real start and end seconds on the original audio timeline.",
   "Detect the harmonic chord progression from the music, with start/end seconds for every meaningful chord event.",
   "Prefer standard chord names such as Bb, F#m7, Cmaj7, G/B.",
   "Determine the overall key and BPM when possible.",
   "Preserve section boundaries such as Intro, Verse, Pre-Chorus, Chorus, Bridge and Outro when they can be inferred.",
   "",
-  "Critical alignment rule: a lyric word may have a chord anchor only when the chord starts at or very near the start of that sung word. This anchor is used to draw the chord directly above that word.",
-  "Re-check every chord change against the actual audio, especially around vocal entrances.",
+  "Critical chord display rule: place a chord label only ONCE, at the first suitable sung word at or immediately after that chord change. Never repeat the same sustained chord above every subsequent word. Leave chord=null on words while the same chord continues; add a new anchor only when the harmony changes to a different chord. If the same chord returns after a different chord, anchor it again at its new entrance. Keep the complete chord timeline in the chords array independently of word anchors.",
+  "Re-check every chord change against the actual audio, especially around vocal entrances. Scan the entire audio timeline in order, not just selected excerpts.",
   "Re-check word timestamps around every chord change.",
   "Never fabricate timestamps. When uncertain, prefer omission over invented content.",
   "Confidence must be a number from 0 to 1."
@@ -143,7 +145,8 @@ const VERIFY_PREFIX = [
   "Correct lyric words or timestamps that do not match the audio.",
   "Correct chord names and chord change times when the audio disagrees.",
   "Keep all events chronological and keep all times inside the song duration.",
-  "For a chord-to-word anchor, only use a lyric word when the chord starts at or very near that word's start. When possible, chordOffset should identify the character index inside the word where the harmonic change lands; otherwise use 0.",
+  "For a chord-to-word anchor, only use a lyric word when the chord starts at or very near that word's start. Place each chord label once per chord event, not on every word where the chord sustains. Leave other words chord=null. If a chord repeats after a different chord, create a fresh anchor. When possible, chordOffset should identify the character index inside the word where the harmonic change lands; otherwise use 0.",
+  "Verify coverage from 0 seconds through the exact end of the audio. Include all lyrics and chord events across every section; never return only the first portion due to convenience. If output limits are approached, prioritize complete chronological coverage and concise word-level entries rather than omitting later sections.",
   "Do not invent lyrics. If uncertainty remains, omit unsupported content or use the safer less-specific chord.",
   "Candidate JSON:"
 ].join("\\n");
@@ -195,17 +198,6 @@ function cleanAnalysis(value) {
     else outChords[i].end = Math.max(outChords[i].start, outChords[i].end);
   }
 
-  for (const line of outLines) {
-    for (const word of line.words) {
-      if (word.chord) continue;
-      let best = null;
-      for (const chord of outChords) {
-        const distance = Math.abs(chord.start - word.start);
-        if (!best || distance < best.distance) best = { chord: chord, distance: distance };
-      }
-      if (best && best.distance <= 0.85) word.chord = best.chord.chord;
-    }
-  }
 
   return {
     title: String(data.title || ""),
@@ -651,11 +643,13 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     const mimeType = req.file.mimetype || "audio/mpeg";
 
     logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");
+    const filenameHint = path.basename(req.file.originalname || "");
+    const analysisPrompt = PRIMARY_PROMPT + "\\nUploaded filename (identification clue only): " + filenameHint;
     const first = cleanAnalysis(await analyzeWithGeminiRetry(
       session,
       audioBase64,
       mimeType,
-      PRIMARY_PROMPT,
+      analysisPrompt,
       req.operationId,
       "analysis_primary",
       apiKey
