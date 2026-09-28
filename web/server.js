@@ -512,13 +512,7 @@ app.post("/api/analyze",async function(req,res){
     currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","מתחיל ניתוח ראשוני: זיהוי שיר, תמלול מילים, אקורדים ותזמון");
     let first=cleanAnalysis(await analyzeWithGeminiFallback(req.auth.apiKeys,audioBase64,mimeType,PRIMARY_PROMPT+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
     logOperation(req.operationId,"analysis_primary_completed","הניתוח הראשוני הושלם; זוהו "+(first.lines||[]).length+" שורות, "+(first.chords||[]).length+" אקורדים");
-    currentStage="reference_search";logOperation(req.operationId,"reference_search_started","בודקים אם קיימים מקורות מידע תומכים לזיהוי השיר");
-    const webEvidence=await searchLyricEvidence(req.auth.apiKey,first.title,first.artist,first.detectedLanguage);
-    logOperation(req.operationId,"reference_search_completed",webEvidence?"בדיקת המקורות הסתיימה ונמצאו הערות תומכות":"בדיקת המקורות הסתיימה ללא הערות זמינות");
-    currentStage="analysis_review";logOperation(req.operationId,"analysis_review_started","מתחיל מעבר ביקורת נוסף על התמלול והאקורדים מול האודיו");
-    const reviewPrompt=VERIFY_PREFIX+"\\n\\nOnline reference notes (secondary evidence only; audio remains the source of truth; do not copy complete copyrighted lyrics):\\n"+(webEvidence||"No reliable online reference notes were available.")+"\\n\\nCandidate JSON:\\n"+JSON.stringify(first);
-    first=cleanAnalysis(await analyzeWithGeminiFallback(req.auth.apiKeys,audioBase64,mimeType,reviewPrompt,req.operationId,"analysis_audio_and_reference_review"));
-    logOperation(req.operationId,"analysis_review_completed","בדיקת התמלול והאקורדים הסתיימה; "+(first.lines||[]).length+" שורות ו־"+(first.chords||[]).length+" אקורדים");
+    logOperation(req.operationId,"analysis_ready","הניתוח הראשוני מוכן; ניתן להציג את המילים והאקורדים ולהפעיל אימות נוסף לפי בחירה");
     currentStage="history_save";
     let historyId="";
     if(supabaseReady()){logOperation(req.operationId,"history_save_started","שומרים את הניתוח בהיסטוריית החשבון");historyId=await saveAnalysisHistory(accountIdForUser(req.auth.session.user),first);logOperation(req.operationId,"history_save_completed","הניתוח נשמר בהיסטוריה"+(historyId?" (מזהה "+historyId+")":""));}
