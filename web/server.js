@@ -19,8 +19,8 @@ app.use(express.json({ limit: "20mb" }));
 
 const sessions = new Map();
 const oauthStates = new Map();
-const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
-const GEMINI_REQUIRED_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/generative-language.retriever";
+const GEMINI_REQUIRED_SCOPE = "https://www.googleapis.com/auth/generative-language.retriever";
 const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
 
 function cookieToken(req) {
