@@ -393,8 +393,9 @@ async function geminiPreflight(session) {
   return data;
 }
 
-async function geminiModelPreflight(session) {
-  const encodedModel = encodeURIComponent(MODEL);
+async function geminiModelPreflight(session, modelName) {
+  const checkedModel = modelName || MODEL;
+  const encodedModel = encodeURIComponent(checkedModel);
   const response = await geminiFetch(
     session,
     "https://generativelanguage.googleapis.com/v1beta/models/" + encodedModel,
@@ -407,7 +408,7 @@ async function geminiModelPreflight(session) {
   const result = {
     ok: response.ok,
     status: response.status,
-    model: MODEL,
+    model: checkedModel,
     errorCode: error && error.code ? error.code : null,
     errorStatus: error && error.status ? error.status : null,
     errorMessage: error && error.message ? error.message : null
@@ -417,6 +418,7 @@ async function geminiModelPreflight(session) {
     const e = new Error(error && error.message ? error.message : "Gemini model preflight failed");
     e.geminiStatus = response.status;
     e.geminiCode = error && error.status ? error.status : "";
+    e.geminiApiCode = error && error.code ? error.code : null;
     throw e;
   }
   return data;
@@ -477,6 +479,7 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
     const error = new Error(data.error && data.error.message || "Gemini generation failed");
     error.geminiStatus = response.status;
     error.geminiCode = data.error && data.error.status || "";
+    error.geminiApiCode = data.error && data.error.code || null;
     throw error;
   }
   const text = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts
@@ -498,12 +501,14 @@ async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, op
       } catch (error) {
         lastError = error;
         const message = String(error && error.message || error);
-        const retryable = /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message)
-          || error && (error.geminiStatus === 429 || error.geminiStatus === 503);
+        const status = Number(error && error.geminiStatus) || null;
+        const apiCode = String(error && error.geminiCode || "");
+        logOperation(operationId, stage + "_api_error", JSON.stringify({model:model,status:status,apiCode:apiCode,message:message.slice(0,500)}), "error");
+        const retryable = status === 429 || status === 503 || apiCode === "RESOURCE_EXHAUSTED" || apiCode === "UNAVAILABLE" || /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message);
         if (!retryable) throw error;
         if (attempt < delays.length) {
           const wait = delays[attempt];
-          logOperation(operationId, stage + "_retry", model + " עמוס; ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length + " בעוד " + (wait / 1000) + " שניות");
+          logOperation(operationId, stage + "_retry", model + " החזיר שגיאה זמנית (HTTP " + (status || "לא ידוע") + ", " + (apiCode || "ללא קוד") + "); ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length + " בעוד " + (wait / 1000) + " שניות");
           await new Promise(function(resolve) { setTimeout(resolve, wait); });
           continue;
         }
@@ -524,16 +529,23 @@ app.get("/api/gemini-diagnostic", async function(req, res) {
   if (!requireGoogleOAuth(res)) return;
   try {
     const models = await geminiPreflight(session);
-    const model = await geminiModelPreflight(session);
+    const modelChecks = await Promise.all(MODELS.map(async function(modelName) {
+      try {
+        const info = await geminiModelPreflight(session, modelName);
+        return { model: modelName, ok: true, name: info && info.name || null, methods: info && info.supportedGenerationMethods || [] };
+      } catch (error) {
+        return { model: modelName, ok: false, status: error.geminiStatus || null, apiCode: error.geminiApiCode || error.geminiCode || null, error: String(error.message || error).slice(0, 400) };
+      }
+    }));
     res.json({
       ok: true,
       project: process.env.GOOGLE_CLOUD_PROJECT,
       scopes: Array.isArray(session.grantedScopes) ? session.grantedScopes.slice() : [],
       model: MODEL,
       fallbackModels: MODELS,
-      modelName: model && model.name ? model.name : null,
-      modelSupportedGenerationMethods: model && model.supportedGenerationMethods ? model.supportedGenerationMethods : [],
-      modelListCount: models && Array.isArray(models.models) ? models.models.length : null
+      modelChecks: modelChecks,
+      modelListCount: models && Array.isArray(models.models) ? models.models.length : null,
+      listedModels: models && Array.isArray(models.models) ? models.models.map(function(item) { return item.name; }).filter(Boolean) : []
     });
   } catch (error) {
     console.error("Gemini diagnostic failed", error);
@@ -543,6 +555,7 @@ app.get("/api/gemini-diagnostic", async function(req, res) {
       model: MODEL,
       status: error && error.geminiStatus ? error.geminiStatus : null,
       code: error && error.geminiCode ? error.geminiCode : null,
+      apiCode: error && error.geminiApiCode ? error.geminiApiCode : null,
       error: error && error.message ? error.message : "Gemini diagnostic failed"
     });
   }
@@ -610,6 +623,7 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     console.error("Gemini analysis failed", JSON.stringify({
       status: error && error.geminiStatus ? error.geminiStatus : null,
       code: error && error.geminiCode ? error.geminiCode : null,
+      apiCode: error && error.geminiApiCode ? error.geminiApiCode : null,
       message: error && error.message ? error.message : String(error)
     }));
     if (error && (error.code === "INSUFFICIENT_SCOPE" || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(String(error.message || "")))) {
