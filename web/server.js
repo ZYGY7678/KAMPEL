@@ -58,7 +58,8 @@ const upload = multer({
   limits: { fileSize: 200 * 1024 * 1024 }
 });
 
-const MODEL = "gemini-3.8-flash";
+const MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+const MODEL = MODELS[0];
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
 const SCHEMA = {
@@ -452,8 +453,8 @@ async function uploadGeminiFile(session, filePath, mimeType, displayName) {
   return data.file;
 }
 
-async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt) {
-  const response = await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent", {
+async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model) {
+  const response = await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -482,19 +483,33 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
 
 async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, operationId, stage) {
   const delays = [2000, 5000, 10000];
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt);
-    } catch (error) {
-      const message = String(error && error.message || error);
-      const retryable = /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message)
-        || error && (error.geminiStatus === 429 || error.geminiStatus === 503);
-      if (!retryable || attempt >= delays.length) throw error;
-      const wait = delays[attempt];
-      logOperation(operationId, stage + "_retry", "Gemini עמוס כרגע; ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length + " בעוד " + (wait / 1000) + " שניות");
-      await new Promise(function(resolve) { setTimeout(resolve, wait); });
+  let lastError = null;
+  for (let modelIndex = 0; modelIndex < MODELS.length; modelIndex += 1) {
+    const model = MODELS[modelIndex];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        logOperation(operationId, stage + "_model", "מנסה ניתוח באמצעות " + model + " (" + (modelIndex + 1) + " מתוך " + MODELS.length + ")");
+        return await analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model);
+      } catch (error) {
+        lastError = error;
+        const message = String(error && error.message || error);
+        const retryable = /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message)
+          || error && (error.geminiStatus === 429 || error.geminiStatus === 503);
+        if (!retryable) throw error;
+        if (attempt < delays.length) {
+          const wait = delays[attempt];
+          logOperation(operationId, stage + "_retry", model + " עמוס; ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length + " בעוד " + (wait / 1000) + " שניות");
+          await new Promise(function(resolve) { setTimeout(resolve, wait); });
+          continue;
+        }
+        if (modelIndex < MODELS.length - 1) {
+          logOperation(operationId, stage + "_fallback", model + " עדיין לא זמין; עובר למודל הבא");
+          break;
+        }
+      }
     }
   }
+  throw lastError || new Error("All Gemini models failed");
 }
 
 app.get("/api/gemini-diagnostic", async function(req, res) {
@@ -509,6 +524,7 @@ app.get("/api/gemini-diagnostic", async function(req, res) {
       project: process.env.GOOGLE_CLOUD_PROJECT,
       scopes: Array.isArray(session.grantedScopes) ? session.grantedScopes.slice() : [],
       model: MODEL,
+      fallbackModels: MODELS,
       modelName: model && model.name ? model.name : null,
       modelSupportedGenerationMethods: model && model.supportedGenerationMethods ? model.supportedGenerationMethods : [],
       modelListCount: models && Array.isArray(models.models) ? models.models.length : null
