@@ -455,6 +455,25 @@ async function uploadGeminiFile(session, filePath, mimeType, displayName) {
   return data.file;
 }
 
+async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model) {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: audioBase64 } }] }], generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, thinkingConfig: { thinkingLevel: "high" } } })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data.error && data.error.message || "Gemini generation failed");
+    error.geminiStatus = response.status; error.geminiCode = data.error && data.error.status || "";
+    error.geminiApiCode = data.error && data.error.code || null;
+    error.retryAfterSeconds = Number(response.headers.get("retry-after")) || 0;
+    throw error;
+  }
+  const text = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts ? data.candidates[0].content.parts.map(function(p){return p.text||"";}).join("") : "";
+  if (!text) throw new Error("Gemini returned an empty response");
+  return JSON.parse(text);
+}
+
 async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model) {
   const response = await geminiFetch(session, "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
     method: "POST",
@@ -491,7 +510,7 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
   return JSON.parse(text);
 }
 
-async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, operationId, stage) {
+async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, operationId, stage, apiKey) {
   const delays = [2000, 5000, 10000];
   let lastError = null;
   for (let modelIndex = 0; modelIndex < MODELS.length; modelIndex += 1) {
@@ -499,7 +518,7 @@ async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, op
     for (let attempt = 0; ; attempt += 1) {
       try {
         logOperation(operationId, stage + "_model", "מנסה ניתוח באמצעות " + model + " (" + (modelIndex + 1) + " מתוך " + MODELS.length + ")");
-        return await analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model);
+        return await (apiKey ? analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model) : analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt, model));
       } catch (error) {
         lastError = error;
         const message = String(error && error.message || error);
@@ -595,7 +614,7 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     console.info("Audio upload received", JSON.stringify({ size: stat.size, mimeType: req.file.mimetype || "audio/mpeg", originalName: path.basename(req.file.originalname || "audio") }));
     logOperation(req.operationId,"upload_received","הקובץ התקבל בשרת ("+stat.size+" בתים)","success");
     logOperation(req.operationId,"gemini_preflight","בודק גישה ל־Gemini ולפרויקט Google Cloud");
-    await geminiPreflight(session);
+    if (!apiKey) await geminiPreflight(session);\n    else logOperation(req.operationId,"gemini_preflight","נבחר מפתח API אישי; מדלג על בדיקת OAuth");
     logOperation(req.operationId,"model_check","בדיקת הרשאות הושלמה; זמינות כל מודל תיבדק לפי קוד התשובה בזמן הניסיון");
     if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if (stat.size > INLINE_AUDIO_MAX_BYTES) {
