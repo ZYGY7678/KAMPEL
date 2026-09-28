@@ -19,8 +19,11 @@ app.use(express.json({ limit: "20mb" }));
 
 const sessions = new Map();
 const oauthStates = new Map();
-const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/generative-language.retriever";
-const GEMINI_REQUIRED_SCOPE = "https://www.googleapis.com/auth/generative-language.retriever";
+const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
+const GEMINI_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/generative-language.retriever"
+];
 const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
 
 function cookieToken(req) {
@@ -300,7 +303,7 @@ app.get("/api/auth/me", function(req, res) {
   res.json({
     authenticated: true,
     user: session.user,
-    geminiScopeGranted: Array.isArray(session.grantedScopes) && session.grantedScopes.includes(GEMINI_REQUIRED_SCOPE)
+    geminiScopeGranted: Array.isArray(session.grantedScopes) && GEMINI_REQUIRED_SCOPES.every(function(scope) { return session.grantedScopes.includes(scope); })
   });
 });
 
@@ -332,7 +335,7 @@ async function refreshGoogleSession(session) {
 
 async function geminiFetch(session, url, options) {
   await refreshGoogleSession(session);
-  if (!Array.isArray(session.grantedScopes) || !session.grantedScopes.includes(GEMINI_REQUIRED_SCOPE)) {
+  if (!Array.isArray(session.grantedScopes) || !GEMINI_REQUIRED_SCOPES.every(function(scope) { return session.grantedScopes.includes(scope); })) {
     const error = new Error("Google authorization is missing the Gemini API cloud-platform scope. Please sign in with Google again and grant the requested Gemini permission.");
     error.code = "INSUFFICIENT_SCOPE";
     throw error;
