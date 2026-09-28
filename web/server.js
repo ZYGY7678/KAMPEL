@@ -642,7 +642,9 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
       apiKey
     ));
 
-    logOperation(req.operationId,"analysis_verify","הניתוח הראשוני התקבל; Gemini מבצע כעת מעבר אימות");
+    logOperation(req.operationId,"analysis_verify_wait","הניתוח הראשוני התקבל; ממתין 30 שניות לפני מעבר האימות");
+    await new Promise(function(resolve) { setTimeout(resolve, 30000); });
+    logOperation(req.operationId,"analysis_verify","חלפו 30 שניות; Gemini מתחיל כעת מעבר אימות");
     const verified = cleanAnalysis(await analyzeWithGeminiRetry(
       session,
       audioBase64,
