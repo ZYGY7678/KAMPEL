@@ -601,8 +601,9 @@ app.get("/api/operations/:id",function(req,res){
 });
 app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);logOperation(req.operationId,"upload_receiving","השרת התחיל לקבל את קובץ האודיו");next();},upload.single("audio"),async function(req,res){
   const session = authSession(req);
-  if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
-  if (!requireGoogleOAuth(res)) return;
+  const apiKey = String(req.headers["x-gemini-api-key"] || "").trim();
+  if (!session && !apiKey) return res.status(401).json({ error: "יש להתחבר עם Google או להזין מפתח Gemini API לפני ניתוח שיר." });
+  if (!apiKey && !requireGoogleOAuth(res)) return;
   if (!req.file) {
     logOperation(req.operationId,"upload_failed","השרת לא קיבל קובץ בשדה audio","error");
     console.warn("Audio upload missing: multer did not receive field audio");
@@ -636,7 +637,8 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
       mimeType,
       PRIMARY_PROMPT,
       req.operationId,
-      "analysis_primary"
+      "analysis_primary",
+      apiKey
     ));
 
     logOperation(req.operationId,"analysis_verify","הניתוח הראשוני התקבל; Gemini מבצע כעת מעבר אימות");
@@ -646,7 +648,8 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
       mimeType,
       VERIFY_PREFIX + "\n" + JSON.stringify(first),
       req.operationId,
-      "analysis_verify"
+      "analysis_verify",
+      apiKey
     ));
 
     logOperation(req.operationId,"completed","הניתוח והאימות הסתיימו; התוצאה נשלחת לדפדפן","success");
