@@ -17,6 +17,14 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "20mb" }));
 
+const operations = new Map();
+function operationId(req) { return String(req.headers["x-operation-id"] || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80); }
+function logOperation(id, stage, message, level) {
+ if (!id) return;
+ const entry={time:new Date().toISOString(),stage,message,level:level||"info"};
+ const list=operations.get(id)||[];list.push(entry);if(list.length>100)list.shift();operations.set(id,list);
+ (level==="error"?console.error:console.info)("APP_OPERATION",JSON.stringify({operationId:id,...entry}));
+}
 const sessions = new Map();
 const oauthStates = new Map();
 const OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
@@ -501,11 +509,16 @@ app.get("/api/gemini-diagnostic", async function(req, res) {
   }
 });
 
-app.post("/api/analyze", upload.single("audio"), async function(req, res) {
+app.get("/api/operations/:id",function(req,res){
+ const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
+ if(!authSession(req))return res.status(401).json({error:"לא מחובר"});
+ res.setHeader("Cache-Control","no-store");res.json({operationId:id,events:operations.get(id)||[]});
+});
+app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);logOperation(req.operationId,"upload_receiving","השרת התחיל לקבל את קובץ האודיו");next();},upload.single("audio"),async function(req,res){
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
   if (!requireGoogleOAuth(res)) return;
-  if (!req.file) {
+  if (!req.file) {\n    logOperation(req.operationId,"upload_failed","השרת לא קיבל קובץ בשדה audio","error");
     console.warn("Audio upload missing: multer did not receive field audio");
     return res.status(400).json({ error: "לא התקבל קובץ אודיו. נסה לבחור את הקובץ שוב." });
   }
@@ -513,7 +526,10 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
   try {
     const stat = await fs.stat(req.file.path);
     console.info("Audio upload received", JSON.stringify({ size: stat.size, mimeType: req.file.mimetype || "audio/mpeg", originalName: path.basename(req.file.originalname || "audio") }));
+    logOperation(req.operationId,"upload_received","הקובץ התקבל בשרת ("+stat.size+" בתים)","success");
+    logOperation(req.operationId,"gemini_preflight","בודק גישה ל־Gemini ולפרויקט Google Cloud");
     await geminiPreflight(session);
+    logOperation(req.operationId,"model_check","בודק זמינות ומאפייני המודל "+MODEL);
     await geminiModelPreflight(session);
     if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if (stat.size > INLINE_AUDIO_MAX_BYTES) {
@@ -524,24 +540,24 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
 
     // Gemini's standard Files API upload endpoint rejects the user OAuth bearer
     // token used by this app. Send small audio inline to generateContent instead.
-    const audioBase64 = (await fs.readFile(req.file.path)).toString("base64");
+    logOperation(req.operationId,"audio_prepare","מכין את האודיו לשליחה למודל");\n    const audioBase64 = (await fs.readFile(req.file.path)).toString("base64");
     const mimeType = req.file.mimetype || "audio/mpeg";
 
-    const first = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+    logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");\n    const first = cleanAnalysis(await analyzeWithGeminiOAuthInline(
       session,
       audioBase64,
       mimeType,
       PRIMARY_PROMPT
     ));
 
-    const verified = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+    logOperation(req.operationId,"analysis_verify","הניתוח הראשוני התקבל; Gemini מבצע כעת מעבר אימות");\n    const verified = cleanAnalysis(await analyzeWithGeminiOAuthInline(
       session,
       audioBase64,
       mimeType,
       VERIFY_PREFIX + "\n" + JSON.stringify(first)
     ));
 
-    res.json(verified);
+    logOperation(req.operationId,"completed","הניתוח והאימות הסתיימו; התוצאה נשלחת לדפדפן","success");\n    res.json(verified);
   } catch (error) {
     console.error("Gemini analysis failed", JSON.stringify({
       status: error && error.geminiStatus ? error.geminiStatus : null,
