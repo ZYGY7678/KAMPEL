@@ -453,7 +453,7 @@ async function analyzeWithGeminiRetry(apiKey,audioBase64,mimeType,prompt,operati
   try{
    if(modelIndex>0)logOperation(operationIdValue,"model_fallback","לא התקבלה תשובה תקינה מהמודל הקודם; עוברים ישירות ל־"+model,"info");
    return await analyzeWithGeminiApiKey(apiKey,audioBase64,mimeType,prompt,model,operationIdValue,stage,1);
-  }catch(error){lastError=error;if(modelIndex===fallbackModels.length-1)throw error;}
+  }catch(error){lastError=error;const status=Number(error&&error.geminiStatus)||0,code=String(error&&error.geminiCode||"");if(status===429||code==="RESOURCE_EXHAUSTED")throw error;if(modelIndex===fallbackModels.length-1)throw error;}
  }
  throw lastError||new Error("All Gemini models failed");
 }
