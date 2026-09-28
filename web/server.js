@@ -511,9 +511,16 @@ async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, op
         }
         const retryable = status === 429 || status === 503 || apiCode === "RESOURCE_EXHAUSTED" || apiCode === "UNAVAILABLE" || /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message);
         if (!retryable) throw error;
+        // Respect Google's Retry-After / retryDelay instead of retrying on a fixed,
+        // shorter schedule. Google may return either HTTP Retry-After or a delay
+        // embedded in the human-readable error message.
+        const retryAfterHeader = Number(error.retryAfterSeconds) || 0;
+        const messageDelay = message.match(/retry in\\s+([0-9]+(?:\\.[0-9]+)?)\\s*s/i);
+        const googleDelayMs = Math.max(retryAfterHeader * 1000, messageDelay ? Number(messageDelay[1]) * 1000 : 0);
+        const isQuotaExhausted = apiCode === "RESOURCE_EXHAUSTED" || /quota exceeded|generate_content_free_tier_requests/i.test(message);
         if (attempt < delays.length) {
-          const wait = delays[attempt];
-          logOperation(operationId, stage + "_retry", model + " החזיר שגיאה זמנית (HTTP " + (status || "לא ידוע") + ", " + (apiCode || "ללא קוד") + "); ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length + " בעוד " + (wait / 1000) + " שניות");
+          const wait = Math.max(googleDelayMs, isQuotaExhausted ? 60000 : delays[attempt]);
+          logOperation(operationId, stage + "_retry", model + " החזיר שגיאה זמנית (HTTP " + (status || "לא ידוע") + ", " + (apiCode || "ללא קוד") + "); ממתין " + Math.ceil(wait / 1000) + " שניות לפי מגבלת Google לפני ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length);
           await new Promise(function(resolve) { setTimeout(resolve, wait); });
           continue;
         }
