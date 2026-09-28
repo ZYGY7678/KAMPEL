@@ -79,8 +79,8 @@ const SCHEMA = {
                 text: { type: "string" },
                 start: { type: "number" },
                 end: { type: "number" },
-                chord: { type: ["string", "null"] },
-                chordOffset: { type: ["integer", "null"] }
+                chord: { type: "string", nullable: true },
+                chordOffset: { type: "integer", nullable: true }
               },
               required: ["id", "text", "start", "end", "chord"]
             }
@@ -418,10 +418,15 @@ app.post("/api/analyze", upload.single("audio"), async function(req, res) {
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני ניתוח שיר." });
   if (!requireGoogleOAuth(res)) return;
-  if (!req.file) return res.status(400).json({ error: "לא התקבל קובץ אודיו" });
+  if (!req.file) {
+    console.warn("Audio upload missing: multer did not receive field audio");
+    return res.status(400).json({ error: "לא התקבל קובץ אודיו. נסה לבחור את הקובץ שוב." });
+  }
 
   try {
     const stat = await fs.stat(req.file.path);
+    console.info("Audio upload received", JSON.stringify({ size: stat.size, mimeType: req.file.mimetype || "audio/mpeg", originalName: path.basename(req.file.originalname || "audio") }));
+    if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if (stat.size > INLINE_AUDIO_MAX_BYTES) {
       return res.status(413).json({
         error: "הקובץ גדול מדי למצב Google OAuth ללא מפתח Gemini. כרגע נתמכים קבצי אודיו עד 14MB."
