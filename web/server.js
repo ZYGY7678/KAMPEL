@@ -195,8 +195,8 @@ function metadataPromptBlock(filename, audioMetadata) {
 
 function sectionKind(section) {
   const s = String(section || "").trim().toLowerCase();
-  if (/chorus|refrain|פזמון/.test(s)) return "chorus";
   if (/pre[- ]?chorus|קדם[- ]?פזמון/.test(s)) return "prechorus";
+  if (/chorus|refrain|פזמון/.test(s)) return "chorus";
   if (/bridge|גשר/.test(s)) return "bridge";
   if (/intro|opening|פתיחה/.test(s)) return "intro";
   if (/outro|ending|סיום/.test(s)) return "outro";
