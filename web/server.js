@@ -480,6 +480,23 @@ async function analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prom
   return JSON.parse(text);
 }
 
+async function analyzeWithGeminiRetry(session, audioBase64, mimeType, prompt, operationId, stage) {
+  const delays = [2000, 5000, 10000];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await analyzeWithGeminiOAuthInline(session, audioBase64, mimeType, prompt);
+    } catch (error) {
+      const message = String(error && error.message || error);
+      const retryable = /high demand|resource[_ ]exhausted|temporarily unavailable|try again later|overloaded/i.test(message)
+        || error && (error.geminiStatus === 429 || error.geminiStatus === 503);
+      if (!retryable || attempt >= delays.length) throw error;
+      const wait = delays[attempt];
+      logOperation(operationId, stage + "_retry", "Gemini עמוס כרגע; ניסיון חוזר " + (attempt + 1) + " מתוך " + delays.length + " בעוד " + (wait / 1000) + " שניות");
+      await new Promise(function(resolve) { setTimeout(resolve, wait); });
+    }
+  }
+}
+
 app.get("/api/gemini-diagnostic", async function(req, res) {
   const session = authSession(req);
   if (!session) return res.status(401).json({ error: "יש להתחבר עם Google לפני בדיקת Gemini." });
@@ -546,19 +563,23 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     const mimeType = req.file.mimetype || "audio/mpeg";
 
     logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");
-    const first = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+    const first = cleanAnalysis(await analyzeWithGeminiRetry(
       session,
       audioBase64,
       mimeType,
-      PRIMARY_PROMPT
+      PRIMARY_PROMPT,
+      req.operationId,
+      "analysis_primary"
     ));
 
     logOperation(req.operationId,"analysis_verify","הניתוח הראשוני התקבל; Gemini מבצע כעת מעבר אימות");
-    const verified = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+    const verified = cleanAnalysis(await analyzeWithGeminiRetry(
       session,
       audioBase64,
       mimeType,
-      VERIFY_PREFIX + "\n" + JSON.stringify(first)
+      VERIFY_PREFIX + "\n" + JSON.stringify(first),
+      req.operationId,
+      "analysis_verify"
     ));
 
     logOperation(req.operationId,"completed","הניתוח והאימות הסתיימו; התוצאה נשלחת לדפדפן","success");
