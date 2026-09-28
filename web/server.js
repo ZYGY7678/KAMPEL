@@ -18,6 +18,7 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "20mb" }));
 
 const operations = new Map();
+const pendingVerifications = new Map();
 function operationId(req) { return String(req.headers["x-operation-id"] || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80); }
 function logOperation(id, stage, message, level) {
  if (!id) return;
@@ -594,6 +595,24 @@ app.get("/api/gemini-diagnostic", async function(req, res) {
   }
 });
 
+app.post("/api/verify/:id",async function(req,res){
+  const session=authSession(req);
+  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
+  const pending=pendingVerifications.get(id);
+  if(!pending)return res.status(404).json({error:"לא נמצאה תוצאת ניתוח זמינה לאימות. הרץ ניתוח ראשוני מחדש."});
+  if(!session&&!pending.apiKey)return res.status(401).json({error:"יש להתחבר מחדש כדי לאמת את השיר."});
+  try{
+    logOperation(id,"analysis_verify","האימות הנוסף התחיל לפי בקשת המשתמש");
+    const verified=cleanAnalysis(await analyzeWithGeminiRetry(session,pending.audioBase64,pending.mimeType,VERIFY_PREFIX+"\\n"+JSON.stringify(pending.first),id,"analysis_verify",pending.apiKey));
+    pendingVerifications.delete(id);
+    logOperation(id,"verification_completed","האימות הסתיים; התוצאה המעודכנת מוכנה","success");
+    res.json({analysis:verified,verified:true});
+  }catch(error){
+    logOperation(id,"verification_failed","האימות לא הושלם: "+String(error&&error.message||error).slice(0,350),"error");
+    res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});
+  }
+});
+
 app.get("/api/operations/:id",function(req,res){
  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
  if(!authSession(req))return res.status(401).json({error:"לא מחובר"});
@@ -642,21 +661,9 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
       apiKey
     ));
 
-    logOperation(req.operationId,"analysis_verify_wait","הניתוח הראשוני התקבל; ממתין 30 שניות לפני מעבר האימות");
-    await new Promise(function(resolve) { setTimeout(resolve, 30000); });
-    logOperation(req.operationId,"analysis_verify","חלפו 30 שניות; Gemini מתחיל כעת מעבר אימות");
-    const verified = cleanAnalysis(await analyzeWithGeminiRetry(
-      session,
-      audioBase64,
-      mimeType,
-      VERIFY_PREFIX + "\n" + JSON.stringify(first),
-      req.operationId,
-      "analysis_verify",
-      apiKey
-    ));
-
-    logOperation(req.operationId,"completed","הניתוח והאימות הסתיימו; התוצאה נשלחת לדפדפן","success");
-    res.json(verified);
+    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,apiKey:apiKey,createdAt:Date.now()});
+    logOperation(req.operationId,"primary_completed","הניתוח הראשוני הסתיים; דף השיר מוצג וניתן להפעיל אימות נוסף","success");
+    res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});
   } catch (error) {
     console.error("Gemini analysis failed", JSON.stringify({
       status: error && error.geminiStatus ? error.geminiStatus : null,
