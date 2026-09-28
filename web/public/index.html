@@ -137,7 +137,7 @@ function updateUploadGate(){
   var status=document.getElementById("accountAccessStatus");if(status)status.textContent=accountState.authenticated?"חשבון Google מחובר · "+(currentApiKey()?"מפתח API הוזן":"צריך להזין מפתח API"):"1. התחבר עם Google · 2. הזן מפתח Gemini API";
   var badge=document.getElementById("planBadge"),desc=document.getElementById("planDescription"),daily=document.getElementById("dailyStatus"),upgrade=document.getElementById("upgradeBtn"),refresh=document.getElementById("refreshPlanBtn"),paymentNote=document.getElementById("paymentNote");
   if(badge){badge.textContent=accountState.premium?"Premium":"מצב רגיל";badge.classList.toggle("premium",Boolean(accountState.premium));}
-  if(desc)desc.textContent=accountState.premium?"כל התכונות פתוחות, כולל ניתוח ללא מגבלת שירים והפרדת קול הזמר.":"שיר אחד ביום. השמעת "קול הזמר בלבד" זמינה רק ב־Premium.";
+  if(desc)desc.textContent=accountState.premium?"כל התכונות פתוחות, כולל ניתוח ללא מגבלת שירים והפרדת קול הזמר.":"שיר אחד ביום. השמעת \"קול הזמר בלבד\" זמינה רק ב־Premium.";
   if(daily)daily.textContent=!accountState.authenticated?"כדי לראות את המכסה היומית יש להתחבר עם Google.":accountState.premium?"Premium פעיל — אין מגבלת שירים יומית":"נותרו היום: "+Math.max(0,Number(accountState.dailyRemaining||0))+" מתוך 1 שיר.";
   if(upgrade){upgrade.classList.toggle("hidden",!accountState.authenticated||accountState.premium);upgrade.disabled=!accountState.paymentConfigured;}
   if(refresh)refresh.classList.toggle("hidden",!accountState.authenticated);
