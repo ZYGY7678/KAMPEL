@@ -541,24 +541,28 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
 
     // Gemini's standard Files API upload endpoint rejects the user OAuth bearer
     // token used by this app. Send small audio inline to generateContent instead.
-    logOperation(req.operationId,"audio_prepare","מכין את האודיו לשליחה למודל");\n    const audioBase64 = (await fs.readFile(req.file.path)).toString("base64");
+    logOperation(req.operationId,"audio_prepare","מכין את האודיו לשליחה למודל");
+    const audioBase64 = (await fs.readFile(req.file.path)).toString("base64");
     const mimeType = req.file.mimetype || "audio/mpeg";
 
-    logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");\n    const first = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+    logOperation(req.operationId,"analysis_primary","Gemini מבצע כעת ניתוח ראשוני של המילים והאקורדים");
+    const first = cleanAnalysis(await analyzeWithGeminiOAuthInline(
       session,
       audioBase64,
       mimeType,
       PRIMARY_PROMPT
     ));
 
-    logOperation(req.operationId,"analysis_verify","הניתוח הראשוני התקבל; Gemini מבצע כעת מעבר אימות");\n    const verified = cleanAnalysis(await analyzeWithGeminiOAuthInline(
+    logOperation(req.operationId,"analysis_verify","הניתוח הראשוני התקבל; Gemini מבצע כעת מעבר אימות");
+    const verified = cleanAnalysis(await analyzeWithGeminiOAuthInline(
       session,
       audioBase64,
       mimeType,
       VERIFY_PREFIX + "\n" + JSON.stringify(first)
     ));
 
-    logOperation(req.operationId,"completed","הניתוח והאימות הסתיימו; התוצאה נשלחת לדפדפן","success");\n    res.json(verified);
+    logOperation(req.operationId,"completed","הניתוח והאימות הסתיימו; התוצאה נשלחת לדפדפן","success");
+    res.json(verified);
   } catch (error) {
     console.error("Gemini analysis failed", JSON.stringify({
       status: error && error.geminiStatus ? error.geminiStatus : null,
