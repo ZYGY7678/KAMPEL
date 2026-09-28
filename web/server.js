@@ -615,7 +615,8 @@ app.post("/api/analyze",function(req,res,next){req.operationId=operationId(req);
     console.info("Audio upload received", JSON.stringify({ size: stat.size, mimeType: req.file.mimetype || "audio/mpeg", originalName: path.basename(req.file.originalname || "audio") }));
     logOperation(req.operationId,"upload_received","הקובץ התקבל בשרת ("+stat.size+" בתים)","success");
     logOperation(req.operationId,"gemini_preflight","בודק גישה ל־Gemini ולפרויקט Google Cloud");
-    if (!apiKey) await geminiPreflight(session);\n    else logOperation(req.operationId,"gemini_preflight","נבחר מפתח API אישי; מדלג על בדיקת OAuth");
+    if (!apiKey) await geminiPreflight(session);
+    else logOperation(req.operationId,"gemini_preflight","נבחר מפתח API אישי; מדלג על בדיקת OAuth");
     logOperation(req.operationId,"model_check","בדיקת הרשאות הושלמה; זמינות כל מודל תיבדק לפי קוד התשובה בזמן הניסיון");
     if (!stat.size) throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if (stat.size > INLINE_AUDIO_MAX_BYTES) {
