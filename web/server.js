@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 import Replicate from "replicate";
+import { detectChordsLocally } from "./chord-detector.js";
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from "docx";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -551,15 +552,23 @@ app.post("/api/analyze",async function(req,res){
     currentStage="metadata";logOperation(req.operationId,"metadata_started","מחלצים פרטי אודיו כגון משך, קצב דגימה ומידע מוטמע");
     const audioMetadata=await extractAudioMetadata(req.file.path);
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
+    currentStage="chord_detection";
+    const detectedChords=await detectChordsLocally(req.file.path,req.operationId,logOperation);
+    if(!detectedChords.length)throw new Error("Chord Mini לא החזיר אקורדים לקובץ הזה. בדוק את פורמט האודיו או את רכיב זיהוי האקורדים בשרת.");
+    logOperation(req.operationId,"chord_detection_ready","Chord Mini זיהה "+detectedChords.length+" אירועי אקורד; מעבירים אותם כנתוני האקורדים הסופיים");
     currentStage="transcription";
     const transcript=await transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId);
-    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","התמלול הושלם; Gemini 3.8 Flash מנתח ישירות את האודיו לזיהוי אקורדים, סולם, קצב ומילים");
-    const chordDetectorContext="\\n\\nCHORD DETECTION: Identify every chord directly from the supplied audio using Gemini 3.8 Flash's audio understanding. The audio itself is the source of truth. Do not rely on a separate local chord detector, lyrics, key, genre, or familiar progressions. Analyze bass, harmony, voicing and chord changes throughout the entire recording, including instrumental transitions.";
-    const transcriptContext="\n\nVERBATIM TRANSCRIPT FROM "+TRANSCRIBE_MODEL+" (use this as the primary source for lyric wording and word timing; correct only when the attached audio clearly contradicts it):\n"+transcript+"\n\nNow analyze the attached audio for harmony, chords, key, tempo, song sections and metadata. Return the complete required JSON schema, retaining the transcript wording and using its timestamps wherever supplied.";
+    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","התמלול הושלם; Gemini מנתח את המילים, המבנה, הסולם והקצב. זיהוי האקורדים נעשה בנפרד ב-Chord Mini");
+    const chordDetectorContext="\\n\\nCHORD DETECTION IS HANDLED EXCLUSIVELY BY THE SEPARATE Chord Mini SERVER MODULE. Do not identify, infer, revise, or generate chords from audio, lyrics, key, genre, or progressions. Set every word chord to null and return an empty chords array; the server will insert the independently detected Chord Mini chord timeline after organization.";
+    const transcriptContext="\\n\\nVERBATIM TRANSCRIPT FROM "+TRANSCRIBE_MODEL+" (use this as the primary source for lyric wording and word timing; correct only when the attached audio clearly contradicts it):\\n"+transcript+"\\n\\nAnalyze the attached audio for lyric alignment, key, tempo, song sections and metadata. Do not perform chord detection. Return the complete required JSON schema, retaining transcript wording and using its timestamps wherever supplied.";
     let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+chordDetectorContext+transcriptContext+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
-    logOperation(req.operationId,"analysis_primary_completed","המודל הראשון השלים את זיהוי המילים והאקורדים; זוהו "+(first.lines||[]).length+" שורות ו-"+(first.chords||[]).length+" אירועי אקורד");
+    logOperation(req.operationId,"analysis_primary_completed","Gemini השלים את ניתוח המילים והמבנה; זוהו "+(first.lines||[]).length+" שורות");
     currentStage="gemini_organize";
     first=cleanAnalysis(await organizeAnalysisWithGemini(req.auth.apiKey,first,req.operationId));
+    first.chords=detectedChords.map(function(chord){return{start:Math.max(0,Number(chord.start)||0),end:Math.max(Number(chord.start)||0,Number(chord.end)||0),chord:String(chord.chord||"").trim(),confidence:Math.max(0,Math.min(1,Number(chord.confidence)||0))};}).filter(function(chord){return chord.chord;}).sort(function(a,b){return a.start-b.start;});
+    for(let i=0;i<first.chords.length;i++){const next=first.chords[i+1];if(first.duration)first.chords[i].end=Math.min(first.duration,Math.max(first.chords[i].start,next?next.start:first.chords[i].end));}
+    for(const line of first.lines||[]){for(const word of line.words||[]){const start=Number(word.start)||0,end=Math.max(start,Number(word.end)||start),midpoint=start+(end-start)/2;let active=null;for(const chord of first.chords){if(chord.start<=midpoint&&chord.end>=midpoint)active=chord;else if(chord.start>midpoint)break;}word.chord=active?active.chord:null;word.chordOffset=active?0:null;}}
+    logOperation(req.operationId,"chord_mini_applied","הוטמעו "+first.chords.length+" אירועי האקורד מ-Chord Mini ושויכו למילים לפי התזמון");
     logOperation(req.operationId,"analysis_ready","המודל הראשון ו-Gemini השלימו את שני שלבי הניתוח והסידור; התוצאה מוכנה להצגה");
     currentStage="history_save";
     let historyId="";
