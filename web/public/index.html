@@ -135,7 +135,7 @@ function updateUploadGate(){
   var reason=uploadGateReason(),can=!reason,choose=document.getElementById("chooseBtn"),input=document.getElementById("fileInput");
   if(choose)choose.disabled=!can;if(input)input.disabled=!can;
   var note=document.getElementById("uploadGateMessage");if(note)note.textContent=can?"✓ הכול מוכן — אפשר להעלות שיר":reason;
-  var adminPanel=document.getElementById("adminPanel");if(adminPanel)adminPanel.classList.toggle("hidden",!accountState.isAdmin);var status=document.getElementById("accountAccessStatus");if(status)status.textContent=accountState.authenticated?"חשבון Google מחובר · "+(accountState.apiKeyRequired===false?"מנוע ניתוח עצמאי פעיל":(currentApiKey().length?(currentApiKey().length===2?"שני מפתחות API הוזנו":"מפתח API הוזן"):"צריך להזין מפתח API")):"1. התחבר עם Google";
+  var adminPanel=document.getElementById("adminPanel");if(adminPanel)adminPanel.classList.toggle("hidden",!accountState.isAdmin);var status=document.getElementById("accountAccessStatus");if(status)status.textContent=accountState.authenticated?"חשבון Google מחובר · "+(currentApiKey()?"מפתח API הוזן":"צריך להזין מפתח API"):"1. התחבר עם Google";
   var badge=document.getElementById("planBadge"),desc=document.getElementById("planDescription"),daily=document.getElementById("dailyStatus"),upgrade=document.getElementById("upgradeBtn"),refresh=document.getElementById("refreshPlanBtn"),paymentNote=document.getElementById("paymentNote");
   if(badge){badge.textContent=accountState.premium?"Premium":"מצב רגיל";badge.classList.toggle("premium",Boolean(accountState.premium));}
   if(desc)desc.textContent=accountState.premium?"כל התכונות פתוחות, כולל ניתוח ללא מגבלת שירים והפרדת קול הזמר.":"שיר אחד ביום. השמעת \"קול הזמר בלבד\" זמינה רק ב־Premium.";
