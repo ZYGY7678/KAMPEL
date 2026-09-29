@@ -12,3 +12,21 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: LOCAL_AUDIO_ENGINE_URL
+        sync: false
+      - key: LOCAL_AUDIO_ENGINE_TOKEN
+        sync: false
+
+  - type: web
+    name: chord-studio-local-engine-chordino
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: LOCAL_AUDIO_ENGINE_TOKEN
+        sync: false
