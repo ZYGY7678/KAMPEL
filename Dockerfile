@@ -45,7 +45,6 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    SONIC_ANNOTATOR_BIN=/usr/local/bin/sonic-annotator \
     VAMP_PATH=/opt/vamp \
     SONIC_ANNOTATOR_BIN=/opt/sonic-annotator/AppRun
 
