@@ -71,6 +71,7 @@ def _run_chordino(path: str, duration: float) -> list[dict]:
         "--csv-stdout",
         "--csv-end-times",
         "--csv-fill-ends",
+        "--csv-omit-filename",
     ]
     env = os.environ.copy()
     env["VAMP_PATH"] = VAMP_PATH
@@ -102,12 +103,24 @@ def _run_chordino(path: str, duration: float) -> list[dict]:
     for row in csv.reader(io.StringIO(completed.stdout or "")):
         if len(row) < 3:
             continue
+
+        # Sonic Annotator versions differ on whether the CSV writer accepts
+        # --csv-omit-filename. Handle both forms so an unexpected filename
+        # column never makes us silently discard the whole chord timeline.
+        offset = 0
         try:
-            start = float(row[0])
+            float(row[0])
+        except (TypeError, ValueError):
+            offset = 1
+
+        if len(row) < offset + 3:
+            continue
+        try:
+            start = float(row[offset])
         except (TypeError, ValueError):
             continue
         try:
-            end = float(row[1])
+            end = float(row[offset + 1])
         except (TypeError, ValueError):
             end = 0.0
         label = str(row[-1] or "").strip()
