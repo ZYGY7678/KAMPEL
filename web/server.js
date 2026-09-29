@@ -4,7 +4,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { GoogleGenAI } from "@google/genai";
 import { parseFile } from "music-metadata";
 import Replicate from "replicate";
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from "docx";
@@ -121,16 +120,12 @@ async function updateAnalysisHistory(id,accountId,analysis){if(!id)return;await 
 async function stripeRequest(endpoint,method,params){if(!process.env.STRIPE_SECRET_KEY){const e=new Error("Stripe עדיין לא הוגדר בשרת.");e.code="STRIPE_NOT_CONFIGURED";throw e;}let url="https://api.stripe.com"+endpoint;const headers={Authorization:"Bearer "+process.env.STRIPE_SECRET_KEY};let body;if(method==="GET"){const q=params?new URLSearchParams(params).toString():"";if(q)url+="?"+q;}else if(params){headers["Content-Type"]="application/x-www-form-urlencoded";body=new URLSearchParams(params).toString();}const resp=await fetch(url,{method:method||"GET",headers:headers,body:body}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"Stripe request failed");e.stripeStatus=resp.status;throw e;}return data;}
 async function stripeHasPaidPremium(id){if(!process.env.STRIPE_SECRET_KEY)return false;const safe=String(id).replace(/"/g,'\"'),query='metadata["chord_studio_premium"]:"1" AND metadata["account_id"]:"'+safe+'" AND status:"succeeded" AND currency:"'+PREMIUM_CURRENCY+'" AND amount:'+PREMIUM_AMOUNT,data=await stripeRequest("/v1/payment_intents/search","GET",{query:query,limit:"1"});return Boolean(data&&Array.isArray(data.data)&&data.data.some(function(item){return item&&item.status==="succeeded"&&Number(item.amount)===PREMIUM_AMOUNT&&String(item.currency||"").toLowerCase()===PREMIUM_CURRENCY&&item.metadata&&item.metadata.chord_studio_premium==="1"&&item.metadata.account_id===id;}));}
 async function isPremiumSession(session){if(!session)return false;if(session.premium===true)return true;const grants=await loadPremiumGrants();if(grants[normalizeEmail(session.user.email)]===true)return true;if(!process.env.STRIPE_SECRET_KEY)return false;if(session.premiumCheckedAt&&Date.now()-session.premiumCheckedAt<30000)return Boolean(session.premium);try{session.premium=await stripeHasPaidPremium(accountIdForUser(session.user));}catch(e){console.error("Stripe premium check failed",String(e&&e.message||e));session.premium=false;}session.premiumCheckedAt=Date.now();return Boolean(session.premium);}
-async function geminiApiKeyPreflight(key){const resp=await fetch("https://generativelanguage.googleapis.com/v1beta/models?key="+encodeURIComponent(key),{method:"GET"}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"מפתח Gemini API אינו תקין או אינו מורשה.");e.geminiStatus=resp.status;e.geminiCode=data&&data.error&&data.error.status||"";e.geminiApiCode=data&&data.error&&data.error.code||null;throw e;}return data;}
-
-
 const upload = multer({
   dest: uploadDir,
   limits: { fileSize: 200 * 1024 * 1024 }
 });
 
-const MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
-const MODEL = MODELS[0];
+const MODEL = "gemini-flash-lite-latest";
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
 const SCHEMA = {
@@ -365,26 +360,6 @@ function cleanAnalysis(value) {
   };
 }
 
-async function analyzeWithGemini(ai, fileUri, mimeType, prompt) {
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: [{
-      role: "user",
-      parts: [
-        { text: prompt },
-        { fileData: { fileUri: fileUri, mimeType: mimeType } }
-      ]
-    }],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: SCHEMA,
-      thinkingConfig: { thinkingLevel: "high" }
-    }
-  });
-  if (!response.text) throw new Error("Gemini returned an empty response");
-  return JSON.parse(response.text);
-}
-
 app.get("/api/health",function(_req,res){res.json({ok:true,model:MODEL,auth:"google-and-email-password",googleOAuthConfigured:Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET),stripeConfigured:Boolean(process.env.STRIPE_SECRET_KEY),replicateConfigured:Boolean(process.env.REPLICATE_API_TOKEN),supabaseConfigured:supabaseReady(),persistence:supabaseReady()?"supabase":"local-fallback",apiKeyRequired:true,dailyLimit:DAILY_SONG_LIMIT});});
 
 app.get("/auth/google",function(_req,res){if(!requireGoogleOAuth(res))return;const state=crypto.randomBytes(24).toString("hex");oauthStates.set(state,Date.now());const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:APP_URL+"/auth/google/callback",response_type:"code",scope:OAUTH_SCOPES,state:state});res.redirect("https://accounts.google.com/o/oauth2/v2/auth?"+params.toString());});
@@ -398,67 +373,75 @@ app.get("/api/history",async function(req,res){const session=await authSession(r
 app.post("/api/auth/logout",async function(req,res){const token=cookieToken(req);if(token){sessions.delete(token);if(supabaseReady())try{await sb("auth_sessions?token_hash=eq."+tokenHash(token),"DELETE");}catch(e){console.error("Session revoke failed",String(e.message||e));}}clearSessionCookie(res);res.json({ok:true});});
 app.post("/api/premium/checkout",async function(req,res){const session=await authSession(req);if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני רכישת Premium."});const accountId=accountIdForUser(session.user);if(await isPremiumSession(session))return res.json({alreadyPremium:true});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions","POST",{mode:"payment",locale:"he",success_url:APP_URL+"/?premium=success&session_id={CHECKOUT_SESSION_ID}",cancel_url:APP_URL+"/?premium=cancel",customer_email:normalizeEmail(session.user.email),client_reference_id:accountId,"line_items[0][price_data][currency]":PREMIUM_CURRENCY,"line_items[0][price_data][product_data][name]":PREMIUM_PRODUCT_NAME,"line_items[0][price_data][product_data][description]":"גישה מלאה ל-Chord Studio, ללא מגבלת שירים יומית ועם הפרדת קול הזמר","line_items[0][price_data][unit_amount]":String(PREMIUM_AMOUNT),"line_items[0][quantity]":"1","metadata[chord_studio_premium]":"1","metadata[account_id]":accountId,"payment_intent_data[metadata][chord_studio_premium]":"1","payment_intent_data[metadata][account_id]":accountId});if(!checkout||!checkout.url)throw new Error("Stripe לא החזיר קישור לתשלום.");res.json({url:checkout.url});}catch(error){console.error("Stripe checkout failed",String(error&&error.stack||error));res.status(502).json({error:"יצירת התשלום נכשלה: "+String(error&&error.message||error).slice(0,250)});}});
 app.get("/api/premium/confirm",async function(req,res){const session=await authSession(req),sessionId=String(req.query.session_id||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני אישור התשלום."});if(!sessionId)return res.status(400).json({error:"חסר מזהה תשלום."});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions/"+encodeURIComponent(sessionId),"GET");const accountId=accountIdForUser(session.user),paid=checkout&&checkout.status==="complete"&&checkout.payment_status==="paid"&&Number(checkout.amount_total)===PREMIUM_AMOUNT&&String(checkout.currency||"").toLowerCase()===PREMIUM_CURRENCY&&checkout.metadata&&checkout.metadata.account_id===accountId&&checkout.metadata.chord_studio_premium==="1";if(!paid)return res.status(403).json({error:"התשלום לא אומת עבור חשבון Google הזה."});session.premium=true;session.premiumCheckedAt=Date.now();res.json({ok:true,premium:true});}catch(error){console.error("Stripe payment confirmation failed",String(error&&error.stack||error));res.status(502).json({error:"אימות התשלום נכשל: "+String(error&&error.message||error).slice(0,250)});}});
-async function requireUploadAccess(req,res,options){req.operationId=operationId(req);logOperation(req.operationId,"access_check_started","השרת בודק חשבון, מפתחות Gemini ומכסה יומית");const session=await authSession(req);if(!session){res.status(401).json({error:"יש להתחבר עם חשבון לפני העלאת קובץ."});return false;}const apiKeys=[String(req.headers["x-gemini-api-key"]||"").trim(),String(req.headers["x-gemini-api-key-2"]||"").trim()].filter(Boolean);if(!apiKeys.length){res.status(401).json({error:"חייבים להזין לפחות מפתח Gemini API אחד לפני העלאת קובץ."});return false;}const premium=await isPremiumSession(session);if(options&&options.premiumRequired&&!premium){res.status(403).json({error:"התכונה הזו זמינה רק במצב Premium. שדרג את החשבון כדי להשתמש בה."});return false;}let usageReservation=null;if(options&&options.consumeDaily&&!premium){const quota=await reserveDailyUsage(accountIdForUser(session.user));if(!quota.allowed){res.status(429).json({error:"הגעת למכסה של שיר אחד ליום במצב רגיל. מצב Premium פותח את המגבלה.",dailyRemaining:0,dailyResetAt:nextDailyReset().toISOString()});return false;}usageReservation=quota;}let validKeys=apiKeys;if(options&&options.validateGeminiKey){validKeys=[];let lastError=null;for(const key of apiKeys){try{await geminiApiKeyPreflight(key);validKeys.push(key);}catch(error){lastError=error;}}if(!validKeys.length){if(usageReservation)await releaseDailyUsage(accountIdForUser(session.user),usageReservation.reservationKey);res.status(400).json({error:"אף אחד ממפתחות Gemini API שהוזנו אינו תקין: "+String(lastError&&lastError.message||"בדוק את המפתחות").slice(0,300)});return false;}}req.auth={session:session,apiKey:validKeys[0],apiKeys:validKeys,premium:premium,usageReservation:usageReservation};req.operationId=operationId(req);logOperation(req.operationId,"access_granted",premium?"חשבון ומפתחות API אומתו; ניתן להעלות את הקובץ":"חשבון, מפתח API ומכסת היום אומתו; ניתן להעלות את הקובץ","success");return true;}
-
-async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model, operationIdValue, stage, attempt) {
-  const startedAt=Date.now();
-  logOperation(operationIdValue,"gemini_request_started","נשלחת בקשת ניתוח ל־Gemini; שלב "+stage+", מודל "+model+", ניסיון "+attempt);
-  let response,data;
-  try {
-    response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: audioBase64 } }] }], generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, thinkingConfig: { thinkingLevel: "high" } } })
-    });
-    const raw=await response.text();
-    try { data=raw?JSON.parse(raw):{}; } catch(parseError) {
-      const e=new Error("Gemini החזיר גוף תשובה שאינו JSON תקין");e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";e.responsePreview=raw.slice(0,500);throw e;
-    }
-    if (!response.ok) {
-      const error = new Error(data.error && data.error.message || "Gemini generation failed");
-      error.geminiStatus = response.status; error.geminiCode = data.error && data.error.status || "";
-      error.geminiApiCode = data.error && data.error.code || null;
-      error.retryAfterSeconds = Number(response.headers.get("retry-after")) || 0;
-      throw error;
-    }
-    const outputText = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts ? data.candidates[0].content.parts.map(function(p){return p.text||"";}).join("") : "";
-    if (!outputText) {const e=new Error("Gemini returned an empty response");e.geminiStatus=response.status;e.geminiCode="EMPTY_RESPONSE";throw e;}
-    let parsed;try{parsed=JSON.parse(outputText);}catch(parseError){const e=new Error("Gemini החזיר תוכן שאינו JSON תקין: "+String(parseError.message||parseError).slice(0,180));e.geminiStatus=response.status;e.geminiCode="INVALID_MODEL_JSON";throw e;}
-    logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+model+", HTTP "+response.status+", משך "+(Date.now()-startedAt)+"ms");
-    return parsed;
-  } catch(error) {
-    logOperation(operationIdValue,"gemini_request_failed","בקשת Gemini נכשלה; שלב "+stage+", מודל "+model+", ניסיון "+attempt+", HTTP "+(error.geminiStatus||"לא התקבל")+", קוד "+(error.geminiCode||"לא ידוע")+", משך "+(Date.now()-startedAt)+"ms, פירוט: "+String(error.message||error).slice(0,350),"error");
-    throw error;
-  }
-}
-
-async function searchLyricEvidence(apiKey,title,artist,language){
-  if(!title||!artist)return "";
-  const prompt="Use Google Search to identify reliable, preferably official or licensed sources for the song below. Song title: "+String(title).slice(0,160)+"; artist: "+String(artist).slice(0,160)+"; language: "+String(language||"unknown").slice(0,80)+". Return a concise factual research note only: confirm or flag title/artist/version mismatches, list source titles and URLs, and include at most a few very short word fragments (never full lines or full lyrics). Do not invent sources or lyrics. If no reliable source is found, say so.";
-  try{
-    const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent?key="+encodeURIComponent(apiKey),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],tools:[{google_search:{}}],generationConfig:{thinkingConfig:{thinkingLevel:"high"}}})});
-    const data=await response.json();if(!response.ok)throw new Error(data&&data.error&&data.error.message||"Grounded search failed");
-    const candidate=data.candidates&&data.candidates[0],parts=candidate&&candidate.content&&candidate.content.parts||[],note=parts.map(function(p){return p.text||"";}).join("\\n").trim();
-    const chunks=candidate&&candidate.groundingMetadata&&candidate.groundingMetadata.groundingChunks||[],sources=chunks.map(function(c){const web=c&&c.web||{};return web.title&&web.uri?web.title+": "+web.uri:"";}).filter(Boolean);
-    return [note,sources.length?"Search sources:\\n"+Array.from(new Set(sources)).join("\\n"):""].filter(Boolean).join("\\n\\n").slice(0,9000);
-  }catch(error){console.warn("Grounded lyric source lookup unavailable",String(error&&error.message||error));return "";}
-}
-
-async function analyzeWithGeminiFallback(apiKeys,audioBase64,mimeType,prompt,operationIdValue,stage){const keys=Array.isArray(apiKeys)&&apiKeys.length?apiKeys:[""];let lastError=null;for(let i=0;i<keys.length;i++){try{return await analyzeWithGeminiRetry(keys[i],audioBase64,mimeType,prompt,operationIdValue,stage);}catch(error){lastError=error;const status=Number(error&&error.geminiStatus)||null,code=String(error&&error.geminiCode||""),message=String(error&&error.message||error),quota=status===429||code==="RESOURCE_EXHAUSTED"||/quota exceeded|resource[_ ]exhausted|rate limit/i.test(message);if(!quota||i===keys.length-1)throw error;logOperation(operationIdValue,"api_key_fallback","המפתח הראשון הגיע למגבלה; מנסים את מפתח ה־API החלופי","info");}}throw lastError||new Error("Gemini analysis failed");}
-async function analyzeWithGeminiRetry(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
- const fallbackModels=[MODELS[0],MODELS[3],MODELS[4]];let lastError=null;
- for(let modelIndex=0;modelIndex<fallbackModels.length;modelIndex++){
-  const model=fallbackModels[modelIndex];
-  try{
-   if(modelIndex>0)logOperation(operationIdValue,"model_fallback","לא התקבלה תשובה תקינה מהמודל הקודם; עוברים ישירות ל־"+model,"info");
-   return await analyzeWithGeminiApiKey(apiKey,audioBase64,mimeType,prompt,model,operationIdValue,stage,1);
-  }catch(error){lastError=error;const status=Number(error&&error.geminiStatus)||0,code=String(error&&error.geminiCode||"");if(status===429||code==="RESOURCE_EXHAUSTED")throw error;if(modelIndex===fallbackModels.length-1)throw error;}
+async function requireUploadAccess(req,res,options){
+ const session=await authSession(req);
+ if(!session){res.status(401).json({error:"יש להתחבר עם חשבון לפני העלאת קובץ."});return false;}
+ const apiKey=String(req.headers["x-gemini-api-key"]||"").trim();
+ if(!apiKey){res.status(401).json({error:"חייבים להזין מפתח Gemini API לפני העלאת קובץ."});return false;}
+ const premium=await isPremiumSession(session);
+ if(options&&options.premiumRequired&&!premium){res.status(403).json({error:"התכונה הזו זמינה רק במצב Premium. שדרג את החשבון כדי להשתמש בה."});return false;}
+ let usageReservation=null;
+ if(options&&options.consumeDaily&&!premium){
+   const quota=await reserveDailyUsage(accountIdForUser(session.user));
+   if(!quota.allowed){res.status(429).json({error:"הגעת למכסה של שיר אחד ליום במצב רגיל. מצב Premium פותח את המגבלה.",dailyRemaining:0,dailyResetAt:nextDailyReset().toISOString()});return false;}
+   usageReservation=quota;
  }
- throw lastError||new Error("All Gemini models failed");
+ req.auth={session:session,apiKey:apiKey,premium:premium,usageReservation:usageReservation};
+ logOperation(req.operationId,"access_granted",premium?"חשבון ומפתח API אומתו; ניתן להעלות את הקובץ":"חשבון, מפתח API ומכסת היום אומתו; ניתן להעלות את הקובץ","success");
+ return true;
 }
-app.get("/api/gemini-diagnostic",async function(req,res){const session=await authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני בדיקת Gemini."});if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני בדיקת Gemini."});try{const data=await geminiApiKeyPreflight(apiKey),models=data&&Array.isArray(data.models)?data.models:[];res.json({ok:true,model:MODEL,models:models.map(function(item){return{name:item.name,methods:item.supportedGenerationMethods||[]};})});}catch(error){res.status(502).json({ok:false,status:error.geminiStatus||null,code:error.geminiCode||null,apiCode:error.geminiApiCode||null,error:String(error.message||error)});}});
 
-app.post("/api/verify/:id",async function(req,res){const session=await authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim(),id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),pending=pendingVerifications.get(id);if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני האימות."});if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני האימות."});if(!pending)return res.status(404).json({error:"לא נמצאה תוצאת ניתוח זמינה לאימות. הרץ ניתוח ראשוני מחדש."});try{await geminiApiKeyPreflight(apiKey);const verified=cleanAnalysis(await analyzeWithGeminiFallback([apiKey,String(req.headers["x-gemini-api-key-2"]||"").trim()].filter(Boolean),pending.audioBase64,pending.mimeType,VERIFY_PREFIX+metadataPromptBlock(pending.filename,pending.audioMetadata)+"\nCandidate JSON:\n"+JSON.stringify(pending.first),id,"analysis_verify"));if(supabaseReady()&&pending.historyId)await updateAnalysisHistory(pending.historyId,accountIdForUser(session.user),verified);pendingVerifications.delete(id);res.json({analysis:verified,verified:true});}catch(error){res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});}});
+async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
+ const startedAt=Date.now();
+ logOperation(operationIdValue,"gemini_request_started","שולחים בקשת Gemini אחת; שלב "+stage+", מודל "+MODEL);
+ try{
+   const controller=new AbortController();
+   const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
+   const timeout=setTimeout(function(){controller.abort();},timeoutMs);
+   let response;
+   try{
+     response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent",{
+       method:"POST",
+       headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+       body:JSON.stringify({
+         contents:[{role:"user",parts:[{text:prompt},{inline_data:{mime_type:mimeType,data:audioBase64}}]}],
+         generationConfig:{responseMimeType:"application/json",responseSchema:SCHEMA}
+       }),
+       signal:controller.signal
+     });
+   }finally{clearTimeout(timeout);}
+   const raw=await response.text();
+   let data={};
+   try{data=raw?JSON.parse(raw):{};}
+   catch(parseError){const e=new Error("Gemini החזיר גוף תשובה שאינו JSON תקין");e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";e.responsePreview=raw.slice(0,500);throw e;}
+   if(!response.ok){
+     const error=new Error(data&&data.error&&data.error.message||"Gemini generation failed");
+     error.geminiStatus=response.status;error.geminiCode=data&&data.error&&data.error.status||"";error.geminiApiCode=data&&data.error&&data.error.code||null;error.retryAfterSeconds=Number(response.headers.get("retry-after"))||0;throw error;
+   }
+   const outputText=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join(""):"";
+   if(!outputText){const e=new Error("Gemini returned an empty response");e.geminiStatus=response.status;e.geminiCode="EMPTY_RESPONSE";throw e;}
+   let parsed;try{parsed=JSON.parse(outputText);}catch(parseError){const e=new Error("Gemini החזיר תוכן שאינו JSON תקין: "+String(parseError.message||parseError).slice(0,180));e.geminiStatus=response.status;e.geminiCode="INVALID_MODEL_JSON";throw e;}
+   logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+MODEL+", HTTP "+response.status+", משך "+(Date.now()-startedAt)+"ms");
+   return parsed;
+ }catch(error){
+   const message=error&&error.name==="AbortError"?"הבקשה ל־Gemini חרגה ממגבלת הזמן":"בקשת Gemini נכשלה";
+   logOperation(operationIdValue,"gemini_request_failed",message+"; שלב "+stage+", מודל "+MODEL+", HTTP "+(error&&error.geminiStatus||"לא התקבל")+", קוד "+(error&&error.geminiCode||"לא ידוע")+", משך "+(Date.now()-startedAt)+"ms, פירוט: "+String(error&&error.message||error).slice(0,350),"error");
+   throw error;
+ }
+}
+
+app.post("/api/verify/:id",async function(req,res){
+ const session=await authSession(req),apiKey=String(req.headers["x-gemini-api-key"]||"").trim(),id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),pending=pendingVerifications.get(id);
+ if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני האימות."});
+ if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני האימות."});
+ if(!pending)return res.status(404).json({error:"לא נמצאה תוצאת ניתוח זמינה לאימות. הרץ ניתוח ראשוני מחדש."});
+ try{
+   const verifyPrompt=VERIFY_PREFIX+metadataPromptBlock(pending.filename,pending.audioMetadata)+"\nCandidate JSON:\n"+JSON.stringify(pending.first);
+   const verified=cleanAnalysis(await analyzeWithGemini(apiKey,pending.audioBase64,pending.mimeType,verifyPrompt,id,"analysis_verify"));
+   if(supabaseReady()&&pending.historyId)await updateAnalysisHistory(pending.historyId,accountIdForUser(session.user),verified);
+   pendingVerifications.delete(id);res.json({analysis:verified,verified:true});
+ }catch(error){res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});}
+});
 
 app.get("/api/operations/:id",async function(req,res){
  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
@@ -500,7 +483,7 @@ app.post("/api/analyze",async function(req,res){
     const audioMetadata=await extractAudioMetadata(req.file.path);
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
     currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","מתחיל ניתוח ראשוני: זיהוי שיר, תמלול מילים, אקורדים ותזמון");
-    let first=cleanAnalysis(await analyzeWithGeminiFallback(req.auth.apiKeys,audioBase64,mimeType,PRIMARY_PROMPT+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
+    let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
     logOperation(req.operationId,"analysis_primary_completed","הניתוח הראשוני הושלם; זוהו "+(first.lines||[]).length+" שורות, "+(first.chords||[]).length+" אקורדים");
     logOperation(req.operationId,"analysis_ready","הניתוח הראשוני מוכן; ניתן להציג את המילים והאקורדים ולהפעיל אימות נוסף לפי בחירה");
     currentStage="history_save";
@@ -513,13 +496,13 @@ app.post("/api/analyze",async function(req,res){
     res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});
    }catch(error){
     if(usageReservation)await releaseDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.reservationKey);
-    let detail=String(error&&error.message||error);for(const key of (req.auth&&req.auth.apiKeys||[]))if(key)detail=detail.split(key).join("[מפתח מוסתר]");
+    let detail=String(error&&error.message||error);if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
     logOperation(req.operationId,"failed","כשל בשלב "+currentStage+" לאחר "+(Date.now()-startedAt)+"ms; HTTP 500; קוד "+String(error&&error.geminiCode||error&&error.code||"לא זמין")+"; פירוט: "+detail.slice(0,500),"error");
     res.status(500).json({error:detail?"Gemini: "+detail:"ניתוח השיר נכשל",operationId:req.operationId,stage:currentStage});
    }finally{try{await fs.unlink(req.file.path);logOperation(req.operationId,"temporary_file_removed","קובץ העבודה הזמני נמחק");}catch(cleanupError){logOperation(req.operationId,"cleanup_warning","לא ניתן היה למחוק קובץ זמני: "+String(cleanupError.message||cleanupError).slice(0,180),"error");}}
   });
  }catch(error){
-  let detail=String(error&&error.message||error);for(const key of (req.auth&&req.auth.apiKeys||[]))if(key)detail=detail.split(key).join("[מפתח מוסתר]");
+  let detail=String(error&&error.message||error);if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
   logOperation(req.operationId,"failed","כשל לפני עיבוד הקובץ בשלב "+currentStage+"; HTTP 500; פירוט: "+detail.slice(0,500),"error");
   if(!res.headersSent)res.status(500).json({error:detail||"שגיאת שרת",operationId:req.operationId,stage:currentStage});
  }
