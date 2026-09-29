@@ -77,8 +77,8 @@ def health():
 
 
 @app.post("/analyze")
-async def analyze(audio: UploadFile = File(...)):
-    suffix = Path(audio.filename or "audio.wav").suffix or ".audio"
+async def analyze(audio: UploadFile = File(...), authorization: str = Header(default="")):
+    expected = os.getenv("LOCAL_AUDIO_ENGINE_TOKEN", "")\n    if not expected or authorization != "Bearer " + expected:\n        raise HTTPException(status_code=401, detail="Unauthorized")\n    suffix = Path(audio.filename or "audio.wav").suffix or ".audio"
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
