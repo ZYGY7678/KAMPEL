@@ -492,7 +492,7 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
       };
     }).filter(function(chord){
       return chord.chord&&chord.end>=chord.start;
-    }).sort(function(a,b){return a.start-b.start;});
+    }).sort(function(a,b){return a.start-b.start;}) : [];
     if(!chords.length){
       const error=new Error("Chordino לא החזיר אף אירוע אקורד לקובץ.");
       error.code="EMPTY_CHORDINO";throw error;

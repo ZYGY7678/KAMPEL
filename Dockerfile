@@ -49,7 +49,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates \
        ffmpeg \
-       libboost-iostreams1.74.0 \
        libsndfile1 \
        libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
