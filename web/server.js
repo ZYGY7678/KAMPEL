@@ -403,10 +403,10 @@ async function requireUploadAccess(req,res,options){req.operationId=operationId(
 async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, model, operationIdValue, stage, attempt) {
   const startedAt=Date.now();
   logOperation(operationIdValue,"gemini_request_started","נשלחת בקשת ניתוח ל־Gemini; שלב "+stage+", מודל "+model+", ניסיון "+attempt);
-  let response,data; const controller=new AbortController(); const timeout=setTimeout(function(){controller.abort();},20000);
+  let response,data;
   try {
     response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey), {
-      method: "POST", signal:controller.signal,
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: audioBase64 } }] }], generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, thinkingConfig: { thinkingLevel: "high" } } })
     });
@@ -427,10 +427,9 @@ async function analyzeWithGeminiApiKey(apiKey, audioBase64, mimeType, prompt, mo
     logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+model+", HTTP "+response.status+", משך "+(Date.now()-startedAt)+"ms");
     return parsed;
   } catch(error) {
-    if(error&&error.name==="AbortError"){const timeoutError=new Error("לא התקבלה תשובה מהמודל בתוך 20 שניות");timeoutError.geminiCode="TIMEOUT";timeoutError.geminiStatus=504;error=timeoutError;}
     logOperation(operationIdValue,"gemini_request_failed","בקשת Gemini נכשלה; שלב "+stage+", מודל "+model+", ניסיון "+attempt+", HTTP "+(error.geminiStatus||"לא התקבל")+", קוד "+(error.geminiCode||"לא ידוע")+", משך "+(Date.now()-startedAt)+"ms, פירוט: "+String(error.message||error).slice(0,350),"error");
     throw error;
-  } finally { clearTimeout(timeout); }
+  }
 }
 
 async function searchLyricEvidence(apiKey,title,artist,language){
