@@ -9,7 +9,7 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, Header
 from faster_whisper import WhisperModel
 
 app = FastAPI(title="Chord Studio Local Audio Engine", version="0.1.0")
