@@ -32,7 +32,7 @@ RUN mkdir -p /opt/vamp \
     && cp /opt/build/nnls-chroma/nnls-chroma.cat /opt/vamp/ \
     && cp -a /opt/build/vamp-plugin-sdk/libvamp-sdk.so* /opt/vamp/
 
-RUN curl -fsSL \
+RUN python3 - <<'PY'\nimport math, struct, wave\nrate = 22050\nframes = rate * 2\nwith wave.open('/tmp/chordino-smoke.wav', 'wb') as w:\n    w.setnchannels(1)\n    w.setsampwidth(2)\n    w.setframerate(rate)\n    for n in range(frames):\n        t = n / rate\n        sample = (\n            0.22 * math.sin(2 * math.pi * 261.6256 * t) +\n            0.17 * math.sin(2 * math.pi * 329.6276 * t) +\n            0.14 * math.sin(2 * math.pi * 392.0 * t)\n        )\n        value = max(-1.0, min(1.0, sample))\n        w.writeframes(struct.pack('<h', int(value * 32767)))\nPY\n\nRUN LD_LIBRARY_PATH=/opt/vamp VAMP_PATH=/opt/vamp /opt/sonic-annotator/AppRun \\\n      -d vamp:nnls-chroma:chordino:simplechord /tmp/chordino-smoke.wav \\\n      -w csv --csv-stdout --csv-end-times --csv-fill-ends --csv-omit-filename \\\n      > /tmp/chordino-smoke.csv \\\n    && test -s /tmp/chordino-smoke.csv \\\n    && grep -Eq '^[0-9]' /tmp/chordino-smoke.csv\n\nRUN curl -fsSL \
       https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz \
       -o /tmp/sonic-annotator.tar.gz \
     && mkdir -p /tmp/sonic-annotator \
