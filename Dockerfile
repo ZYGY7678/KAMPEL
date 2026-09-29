@@ -9,6 +9,7 @@ RUN apt-get update \
        curl \
        git \
        libboost-all-dev \
+       libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/build
