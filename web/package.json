@@ -16,9 +16,6 @@
     "multer": "^2.0.2",
     "music-metadata": "^11.10.0",
     "replicate": "^1.0.0",
-    "audio": "^2.7.0",
-    "@audio/mir": "^1.1.3",
-    "@audio/mir-chroma": "^1.1.2",
-    "@audio/mir-chord": "^1.1.2"
+    "audio": "^2.7.0"
   }
 }
