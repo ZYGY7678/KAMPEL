@@ -125,7 +125,7 @@ const upload = multer({
   limits: { fileSize: 200 * 1024 * 1024 }
 });
 
-const MODEL = "gemini-flash-lite-latest";
+const MODEL = "gemini-3.8-flash";
 const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
