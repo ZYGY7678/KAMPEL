@@ -15,6 +15,7 @@
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "music-metadata": "^11.10.0",
-    "replicate": "^1.0.0"
+    "replicate": "^1.0.0",
+    "audio": "^2.7.0"
   }
 }
