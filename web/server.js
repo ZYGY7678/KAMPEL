@@ -126,6 +126,7 @@ const upload = multer({
 });
 
 const MODEL = "gemini-flash-lite-latest";
+const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
 const SCHEMA = {
@@ -391,6 +392,36 @@ async function requireUploadAccess(req,res,options){
  return true;
 }
 
+async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue){
+  const startedAt=Date.now();
+  logOperation(operationIdValue,"transcription_started","מתחיל תמלול מלא באמצעות "+TRANSCRIBE_MODEL);
+  const controller=new AbortController();
+  const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
+  const timeout=setTimeout(function(){controller.abort();},timeoutMs);
+  try{
+    const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(TRANSCRIBE_MODEL)+":generateContent",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+      body:JSON.stringify({
+        contents:[{role:"user",parts:[{text:"Transcribe all audible singing and spoken words verbatim in the original language. Preserve repetitions and vocal ad-libs. Return the complete transcript with word-level timestamps when available."},{inline_data:{mime_type:mimeType,data:audioBase64}}]}],
+        generationConfig:{audioTranscriptionConfig:{wordTimestamp:true}}
+      }),
+      signal:controller.signal
+    });
+    const raw=await response.text();let data={};
+    try{data=raw?JSON.parse(raw):{};}catch{const e=new Error("Gemini Transcribe החזיר תשובה שאינה JSON תקין");e.geminiStatus=response.status;throw e;}
+    if(!response.ok){const e=new Error(data&&data.error&&data.error.message||"Gemini Transcribe request failed");e.geminiStatus=response.status;e.geminiCode=data&&data.error&&data.error.status||"";throw e;}
+    const transcript=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join(""):"";
+    if(!transcript.trim()){const e=new Error("Gemini Transcribe החזיר תמלול ריק");e.geminiStatus=response.status;e.geminiCode="EMPTY_TRANSCRIPT";throw e;}
+    logOperation(operationIdValue,"transcription_completed","התמלול הושלם באמצעות "+TRANSCRIBE_MODEL+"; משך "+(Date.now()-startedAt)+"ms");
+    return transcript;
+  }catch(error){
+    const message=error&&error.name==="AbortError"?"בקשת התמלול חרגה ממגבלת הזמן":"תמלול באמצעות Gemini נכשל";
+    logOperation(operationIdValue,"transcription_failed",message+"; מודל "+TRANSCRIBE_MODEL+"; HTTP "+(error&&error.geminiStatus||"לא התקבל")+"; פירוט: "+String(error&&error.message||error).slice(0,350),"error");
+    throw error;
+  }finally{clearTimeout(timeout);}
+}
+
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
  const startedAt=Date.now();
  logOperation(operationIdValue,"gemini_request_started","שולחים בקשת Gemini אחת; שלב "+stage+", מודל "+MODEL);
@@ -482,8 +513,11 @@ app.post("/api/analyze",async function(req,res){
     currentStage="metadata";logOperation(req.operationId,"metadata_started","מחלצים פרטי אודיו כגון משך, קצב דגימה ומידע מוטמע");
     const audioMetadata=await extractAudioMetadata(req.file.path);
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
-    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","מתחיל ניתוח ראשוני: זיהוי שיר, תמלול מילים, אקורדים ותזמון");
-    let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
+    currentStage="transcription";
+    const transcript=await transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId);
+    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","התמלול הושלם; מתחיל ניתוח אקורדים, סולם, קצב וזיהוי שיר באמצעות "+MODEL);
+    const transcriptContext="\n\nVERBATIM TRANSCRIPT FROM "+TRANSCRIBE_MODEL+" (use this as the primary source for lyric wording and word timing; correct only when the attached audio clearly contradicts it):\n"+transcript+"\n\nNow analyze the attached audio for harmony, chords, key, tempo, song sections and metadata. Return the complete required JSON schema, retaining the transcript wording and using its timestamps wherever supplied.";
+    let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+transcriptContext+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
     logOperation(req.operationId,"analysis_primary_completed","הניתוח הראשוני הושלם; זוהו "+(first.lines||[]).length+" שורות, "+(first.chords||[]).length+" אקורדים");
     logOperation(req.operationId,"analysis_ready","הניתוח הראשוני מוכן; ניתן להציג את המילים והאקורדים ולהפעיל אימות נוסף לפי בחירה");
     currentStage="history_save";
