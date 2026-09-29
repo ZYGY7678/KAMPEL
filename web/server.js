@@ -420,41 +420,43 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
 }
 
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
- const startedAt=Date.now();
- logOperation(operationIdValue,"gemini_request_started","שולחים בקשת Gemini אחת; שלב "+stage+", מודל "+MODEL);
- try{
+ const startedAt=Date.now(),maxRetries=10,retryDelayMs=60000;
+ for(let attempt=0;;attempt++){
+  try{
    const controller=new AbortController();
    const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
    const timeout=setTimeout(function(){controller.abort();},timeoutMs);
    let response;
    try{
-     response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent",{
-       method:"POST",
-       headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
-       body:JSON.stringify({
-         contents:[{role:"user",parts:[{text:prompt},{inline_data:{mime_type:mimeType,data:audioBase64}}]}],
-         generationConfig:{responseMimeType:"application/json",responseSchema:SCHEMA}
-       }),
-       signal:controller.signal
-     });
+    response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent",{
+     method:"POST",
+     headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+     body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt},{inline_data:{mime_type:mimeType,data:audioBase64}}]}],generationConfig:{responseMimeType:"application/json",responseSchema:SCHEMA}}),
+     signal:controller.signal
+    });
    }finally{clearTimeout(timeout);}
-   const raw=await response.text();
-   let data={};
-   try{data=raw?JSON.parse(raw):{};}
-   catch(parseError){const e=new Error("Gemini החזיר גוף תשובה שאינו JSON תקין");e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";e.responsePreview=raw.slice(0,500);throw e;}
+   const raw=await response.text();let data={};
+   try{data=raw?JSON.parse(raw):{};}catch(parseError){const e=new Error("Gemini החזיר גוף תשובה שאינו JSON תקין");e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";e.responsePreview=raw.slice(0,500);throw e;}
    if(!response.ok){
-     const error=new Error(data&&data.error&&data.error.message||"Gemini generation failed");
-     error.geminiStatus=response.status;error.geminiCode=data&&data.error&&data.error.status||"";error.geminiApiCode=data&&data.error&&data.error.code||null;error.retryAfterSeconds=Number(response.headers.get("retry-after"))||0;throw error;
+    const error=new Error(data&&data.error&&data.error.message||"Gemini generation failed");
+    error.geminiStatus=response.status;error.geminiCode=data&&data.error&&data.error.status||"";error.geminiApiCode=data&&data.error&&data.error.code||null;error.retryAfterSeconds=Number(response.headers.get("retry-after"))||0;throw error;
    }
    const outputText=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join(""):"";
    if(!outputText){const e=new Error("Gemini returned an empty response");e.geminiStatus=response.status;e.geminiCode="EMPTY_RESPONSE";throw e;}
    let parsed;try{parsed=JSON.parse(outputText);}catch(parseError){const e=new Error("Gemini החזיר תוכן שאינו JSON תקין: "+String(parseError.message||parseError).slice(0,180));e.geminiStatus=response.status;e.geminiCode="INVALID_MODEL_JSON";throw e;}
-   logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+MODEL+", HTTP "+response.status+", משך "+(Date.now()-startedAt)+"ms");
+   logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+MODEL+", HTTP "+response.status+", ניסיון "+(attempt+1)+", משך "+(Date.now()-startedAt)+"ms");
    return parsed;
- }catch(error){
+  }catch(error){
+   const overload=Number(error&&error.geminiStatus)===429||Number(error&&error.geminiStatus)===503||/RESOURCE_EXHAUSTED|UNAVAILABLE|overload|overloaded|high demand|rate.?limit/i.test(String(error&&error.geminiCode||"")+" "+String(error&&error.message||""));
+   if(overload&&attempt<maxRetries){
+    logOperation(operationIdValue,"gemini_overload_retry","Gemini עמוס או הגביל בקשות; ניסיון "+(attempt+1)+" נכשל. ניסיון חוזר "+(attempt+2)+" מתוך "+(maxRetries+1)+" בעוד דקה","warning");
+    await new Promise(function(resolve){setTimeout(resolve,retryDelayMs);});
+    continue;
+   }
    const message=error&&error.name==="AbortError"?"הבקשה ל־Gemini חרגה ממגבלת הזמן":"בקשת Gemini נכשלה";
-   logOperation(operationIdValue,"gemini_request_failed",message+"; שלב "+stage+", מודל "+MODEL+", HTTP "+(error&&error.geminiStatus||"לא התקבל")+", קוד "+(error&&error.geminiCode||"לא ידוע")+", משך "+(Date.now()-startedAt)+"ms, פירוט: "+String(error&&error.message||error).slice(0,350),"error");
+   logOperation(operationIdValue,"gemini_request_failed",message+"; שלב "+stage+", מודל "+MODEL+", HTTP "+(error&&error.geminiStatus||"לא התקבל")+", קוד "+(error&&error.geminiCode||"לא ידוע")+", ניסיונות "+(attempt+1)+", משך "+(Date.now()-startedAt)+"ms, פירוט: "+String(error&&error.message||error).slice(0,350),"error");
    throw error;
+  }
  }
 }
 
