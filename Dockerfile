@@ -25,13 +25,13 @@ RUN git clone --depth 1 --branch vamp-plugin-sdk-v2.10 \
 
 RUN git clone --depth 1 https://github.com/c4dm/nnls-chroma.git nnls-chroma \
     && cd nnls-chroma \
+    && sed -i 's/-lvamp-sdk/-Wl,-Bstatic -lvamp-sdk -Wl,-Bdynamic/' Makefile.inc Makefile.linux \
     && make -f Makefile.linux VAMP_SDK_DIR=/opt/build/vamp-plugin-sdk
 
 RUN mkdir -p /opt/vamp \
     && cp /opt/build/nnls-chroma/nnls-chroma.so /opt/vamp/ \
     && cp /opt/build/nnls-chroma/nnls-chroma.n3 /opt/vamp/ \
-    && cp /opt/build/nnls-chroma/nnls-chroma.cat /opt/vamp/ \
-    && cp -a /opt/build/vamp-plugin-sdk/libvamp-sdk.so* /opt/vamp/
+    && cp /opt/build/nnls-chroma/nnls-chroma.cat /opt/vamp/
 
 RUN curl -fsSL \
       https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz \
