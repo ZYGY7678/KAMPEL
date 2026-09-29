@@ -125,7 +125,7 @@ const upload = multer({
   limits: { fileSize: 200 * 1024 * 1024 }
 });
 
-const MODEL = "gemini-3.8-flash";
+const MODEL = "gemini-2.5-pro";
 const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
@@ -364,7 +364,7 @@ function cleanAnalysis(value) {
   };
 }
 
-app.get("/api/health",function(_req,res){res.json({ok:true,model:MODEL,auth:"google-and-email-password",googleOAuthConfigured:Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET),stripeConfigured:false,chordDetector:"gemini-3.8-flash",chordDetectorConfigured:true,replicateConfigured:Boolean(process.env.REPLICATE_API_TOKEN),supabaseConfigured:supabaseReady(),persistence:supabaseReady()?"supabase":"local-fallback",apiKeyRequired:true,dailyLimit:null});});
+app.get("/api/health",function(_req,res){res.json({ok:true,model:MODEL,auth:"google-and-email-password",googleOAuthConfigured:Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET),stripeConfigured:false,chordDetector:MODEL,chordDetectorConfigured:true,replicateConfigured:Boolean(process.env.REPLICATE_API_TOKEN),supabaseConfigured:supabaseReady(),persistence:supabaseReady()?"supabase":"local-fallback",apiKeyRequired:true,dailyLimit:null});});
 
 app.get("/auth/google",function(_req,res){if(!requireGoogleOAuth(res))return;const state=crypto.randomBytes(24).toString("hex");oauthStates.set(state,Date.now());const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:APP_URL+"/auth/google/callback",response_type:"code",scope:OAUTH_SCOPES,state:state});res.redirect("https://accounts.google.com/o/oauth2/v2/auth?"+params.toString());});
 app.get("/auth/google/callback",async function(req,res){const state=String(req.query.state||""),code=String(req.query.code||""),created=oauthStates.get(state);oauthStates.delete(state);if(!created||Date.now()-created>10*60*1000||!code)return res.status(400).send("Google authentication state expired or invalid");try{const tokenRes=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:code,client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:APP_URL+"/auth/google/callback",grant_type:"authorization_code"})}),tokens=await tokenRes.json();if(!tokenRes.ok||!tokens.access_token)throw new Error(tokens.error_description||"Google token exchange failed");const userRes=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+tokens.access_token}}),user=await userRes.json();if(!userRes.ok||!user.sub||user.email_verified!==true)throw new Error("Google user info failed or email is not verified");const sessionId=crypto.randomBytes(32).toString("hex"),userData={id:String(user.sub),name:user.name||user.email||"Google user",email:normalizeEmail(user.email),picture:user.picture||""};if(supabaseReady()){const accountId=await ensureAccount(userData);userData.accountId=accountId;await sb("auth_sessions","POST",{token_hash:tokenHash(sessionId),account_id:accountId,expires_at:new Date(Date.now()+2592000000).toISOString()});}else{sessions.set(sessionId,{user:userData,premium:false,premiumCheckedAt:0,createdAt:Date.now()});}setSessionCookie(res,sessionId);res.redirect("/");}catch(error){console.error(error);res.status(500).send("Google authentication failed");}});
