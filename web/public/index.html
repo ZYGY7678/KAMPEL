@@ -116,7 +116,7 @@
 </section>
 
 <section class="workspace">
-<div class="card lyrics"><div class="paper-head"><strong>♫</strong><span id="paperTitle"></span><small id="paperKey"></small></div><div id="lyricsBody" class="lyrics-body"></div><div class="paper-foot">נוצר באמצעות Chord Studio · זיהוי אקורדים: Chord Mini · תמלול וסידור: Gemini</div></div>
+<div class="card lyrics"><div class="paper-head"><strong>♫</strong><span id="paperTitle"></span><small id="paperKey"></small></div><div id="lyricsBody" class="lyrics-body"></div><div class="paper-foot">נוצר באמצעות Chord Studio · זיהוי אקורדים: Chord Engine רב־מעברי · תמלול וסידור: Gemini</div></div>
 <aside class="side">
 <div class="card"><span class="label">דיוק ותזמון</span><div class="score"><b id="confidence">—</b><span>confidence</span></div><div class="meter"><i id="confidenceMeter" style="width:0%"></i></div><p>האקורדים מוצמדים למילים לפי זמני התחלה. הניתוח מוצג מיד, ואפשר להפעיל אימות נוסף לפי בחירה.</p></div>
 <div class="card"><div class="title-row"><span>רצף אקורדים</span><small id="chordCount">0</small></div><div id="chordList" class="chords"></div></div>
@@ -164,7 +164,7 @@ var simplifyMode = "off";
 var progressTimer = null;
 var quotaTimer = null;
 var analysisMessageTimer = null;
-var analysisMessages = ["בודקים את תקינות הקובץ…","Chord Mini מנתח את האודיו ומזהה אקורדים…","Gemini מתמלל את מילות השיר…","Gemini מסדר את השורות ומחלק לבית ולפזמון…","מחברים את המילים לתזמון האקורדים…","בונים את דף המילים והאקורדים…"];
+var analysisMessages = ["בודקים את תקינות הקובץ…","Chord Engine רב־מעברי מנתח את האודיו ומזהה אקורדים…","Gemini מתמלל את מילות השיר…","Gemini מסדר את השורות ומחלק לבית ולפזמון…","מחברים את המילים לתזמון האקורדים…","בונים את דף המילים והאקורדים…"];
 var analysisMessageIndex = 0;
 function startAnalysisMessages(){var wrap=document.getElementById("uploadProgress");wrap.classList.add("analyzing");document.getElementById("uploadStatus").textContent=analysisMessages[0];analysisMessageIndex=0;if(analysisMessageTimer)clearInterval(analysisMessageTimer);analysisMessageTimer=setInterval(function(){analysisMessageIndex=(analysisMessageIndex+1)%analysisMessages.length;document.getElementById("uploadStatus").textContent=analysisMessages[analysisMessageIndex];},3500)}
 function stopAnalysisMessages(){if(analysisMessageTimer){clearInterval(analysisMessageTimer);analysisMessageTimer=null;}var wrap=document.getElementById("uploadProgress");if(wrap)wrap.classList.remove("analyzing");}
