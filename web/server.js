@@ -86,7 +86,7 @@ async function getDailyUsage(id){
    const row=Array.isArray(rows)?(rows[0]||{}):(rows||{});
    return {date:row.usage_date||todayKey(),used:Number(row.used)||0,reserved:Number(row.reserved)||0,remaining:Math.max(0,Number(row.remaining)||0),resetAt:row.reset_at||null};
  }
- return withUsageWriteLock(async function(){const state=await loadUsageState(),date=todayKey(),entry=state.users[id],used=entry&&entry.date===date?Math.max(0,Number(entry.count)||0):0,res=usageReservations.has(usageReservationKey(id,date));return{date:date,used:used,remaining:Math.max(0,DAILY_SONG_LIMIT-used-(res?1:0)),reserved:res?1:0};});
+ return withUsageWriteLock(async function(){const state=await loadUsageState(),date=todayKey(),entry=state.users[id],used=entry&&entry.date===date?Math.max(0,Number(entry.count)||0):0,res=usageReservations.has(usageReservationKey(id,date));return{date:date,used:used,remaining:Math.max(0,DAILY_SONG_LIMIT-used-(res?1:0)),reserved:res?1:0,resetAt:nextDailyReset().toISOString()};});
 }
 async function reserveDailyUsage(id){
  if(supabaseReady()){
