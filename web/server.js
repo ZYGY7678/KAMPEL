@@ -575,9 +575,15 @@ app.post("/api/analyze",async function(req,res){
     if(supabaseReady()){logOperation(req.operationId,"history_save_started","שומרים את הניתוח בהיסטוריית החשבון");historyId=await saveAnalysisHistory(accountIdForUser(req.auth.session.user),first);logOperation(req.operationId,"history_save_completed","הניתוח נשמר בהיסטוריה"+(historyId?" (מזהה "+historyId+")":""));}
     pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,historyId:historyId,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
     currentStage="quota_commit";
-    if(usageReservation){logOperation(req.operationId,"quota_commit_started","מעדכנים את ניצול המכסה היומית לאחר ניתוח שהושלם");await commitDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.date,usageReservation.reservationKey);logOperation(req.operationId,"quota_commit_completed","המכסה היומית עודכנה");}
+    let quotaStatus=null;
+    if(usageReservation){
+      logOperation(req.operationId,"quota_commit_started","מעדכנים את ניצול המכסה היומית לאחר ניתוח שהושלם");
+      await commitDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.date,usageReservation.reservationKey);
+      logOperation(req.operationId,"quota_commit_completed","המכסה היומית עודכנה");
+      if(!req.auth.premium) quotaStatus=await getDailyUsage(accountIdForUser(req.auth.session.user));
+    }
     currentStage="response";logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה לדפדפן; משך כולל "+(Date.now()-startedAt)+"ms","success");
-    res.json({analysis:first,verificationAvailable:true,operationId:req.operationId});
+    res.json({analysis:first,verificationAvailable:true,operationId:req.operationId,dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null});
    }catch(error){
     if(usageReservation)await releaseDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.reservationKey);
     let detail=String(error&&error.message||error);if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
