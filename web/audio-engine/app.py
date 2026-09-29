@@ -71,7 +71,6 @@ def _run_chordino(path: str, duration: float) -> list[dict]:
         "--csv-stdout",
         "--csv-end-times",
         "--csv-fill-ends",
-        "--csv-omit-filenames",
     ]
     env = os.environ.copy()
     env["VAMP_PATH"] = VAMP_PATH
