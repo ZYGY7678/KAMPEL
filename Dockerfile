@@ -32,12 +32,13 @@ RUN mkdir -p /opt/vamp \
 
 RUN curl -fsSL \
       https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz \
-      -o /tmp/sonic-annotator.tar.gz \
-    && mkdir -p /tmp/sonic-annotator \
-    && tar -xzf /tmp/sonic-annotator.tar.gz -C /tmp/sonic-annotator \
-    && find /tmp/sonic-annotator -type f -name sonic-annotator -exec cp {} /usr/local/bin/sonic-annotator \; \
-    && chmod +x /usr/local/bin/sonic-annotator \
-    && VAMP_PATH=/opt/vamp /usr/local/bin/sonic-annotator -l \
+      -o /tmp/sonic-annotator.AppImage \
+    && chmod +x /tmp/sonic-annotator.AppImage \
+    && cd /tmp \
+    && ./sonic-annotator.AppImage --appimage-extract \
+    && mv /tmp/squashfs-root /opt/sonic-annotator \
+    && test -x /opt/sonic-annotator/AppRun \
+    && VAMP_PATH=/opt/vamp /opt/sonic-annotator/AppRun -l \
        | grep -Fq "vamp:nnls-chroma:chordino:simplechord"
 
 FROM python:3.11-slim
@@ -45,7 +46,8 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     SONIC_ANNOTATOR_BIN=/usr/local/bin/sonic-annotator \
-    VAMP_PATH=/opt/vamp
+    VAMP_PATH=/opt/vamp \
+    SONIC_ANNOTATOR_BIN=/opt/sonic-annotator/AppRun
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -61,7 +63,7 @@ COPY web/audio-engine/requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt
 
 COPY web/audio-engine/app.py /app/app.py
-COPY --from=vamp-builder /usr/local/bin/sonic-annotator /usr/local/bin/sonic-annotator
+COPY --from=vamp-builder /opt/sonic-annotator /opt/sonic-annotator
 COPY --from=vamp-builder /opt/vamp /opt/vamp
 
 EXPOSE 10000
