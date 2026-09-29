@@ -29,7 +29,8 @@ RUN git clone --depth 1 https://github.com/c4dm/nnls-chroma.git nnls-chroma \
 RUN mkdir -p /opt/vamp \
     && cp /opt/build/nnls-chroma/nnls-chroma.so /opt/vamp/ \
     && cp /opt/build/nnls-chroma/nnls-chroma.n3 /opt/vamp/ \
-    && cp /opt/build/nnls-chroma/nnls-chroma.cat /opt/vamp/
+    && cp /opt/build/nnls-chroma/nnls-chroma.cat /opt/vamp/ \
+    && cp -a /opt/build/vamp-plugin-sdk/libvamp-sdk.so* /opt/vamp/
 
 RUN curl -fsSL \
       https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz \
@@ -39,7 +40,7 @@ RUN curl -fsSL \
     && tail -c +$((OFFSET + 1)) /tmp/sonic-annotator.AppImage > /tmp/sonic-annotator.squashfs \
     && unsquashfs -d /opt/sonic-annotator /tmp/sonic-annotator.squashfs >/dev/null \
     && test -x /opt/sonic-annotator/AppRun \
-    && VAMP_PATH=/opt/vamp /opt/sonic-annotator/AppRun -l \
+    && LD_LIBRARY_PATH=/opt/vamp VAMP_PATH=/opt/vamp /opt/sonic-annotator/AppRun -l \
        | grep -Fq "vamp:nnls-chroma:chordino:simplechord"
 
 FROM python:3.11-slim
@@ -47,7 +48,8 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     VAMP_PATH=/opt/vamp \
-    SONIC_ANNOTATOR_BIN=/opt/sonic-annotator/AppRun
+    SONIC_ANNOTATOR_BIN=/opt/sonic-annotator/AppRun \
+    LD_LIBRARY_PATH=/opt/vamp
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
