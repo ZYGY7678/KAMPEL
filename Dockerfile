@@ -34,11 +34,15 @@ RUN mkdir -p /opt/vamp \
 
 RUN curl -fsSL \
       https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz \
-      -o /tmp/sonic-annotator.AppImage \
-    && OFFSET="$(grep -oba "hsqs" /tmp/sonic-annotator.AppImage | head -1 | cut -d: -f1)" \
-    && test -n "$OFFSET" \
-    && tail -c +$((OFFSET + 1)) /tmp/sonic-annotator.AppImage > /tmp/sonic-annotator.squashfs \
-    && unsquashfs -d /opt/sonic-annotator /tmp/sonic-annotator.squashfs >/dev/null \
+      -o /tmp/sonic-annotator.tar.gz \
+    && mkdir -p /tmp/sonic-annotator \
+    && tar -xzf /tmp/sonic-annotator.tar.gz -C /tmp/sonic-annotator \
+    && APPIMAGE="$(find /tmp/sonic-annotator -type f -name sonic-annotator | head -1)" \
+    && test -n "$APPIMAGE" \
+    && chmod +x "$APPIMAGE" \
+    && cd /tmp \
+    && "$APPIMAGE" --appimage-extract \
+    && mv /tmp/squashfs-root /opt/sonic-annotator \
     && test -x /opt/sonic-annotator/AppRun \
     && LD_LIBRARY_PATH=/opt/vamp VAMP_PATH=/opt/vamp /opt/sonic-annotator/AppRun -l \
        | grep -Fq "vamp:nnls-chroma:chordino:simplechord"
