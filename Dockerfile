@@ -11,6 +11,7 @@ RUN apt-get update \
        libboost-all-dev \
        libsndfile1-dev \
        pkg-config \
+       squashfs-tools \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/build
@@ -33,10 +34,10 @@ RUN mkdir -p /opt/vamp \
 RUN curl -fsSL \
       https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz \
       -o /tmp/sonic-annotator.AppImage \
-    && chmod +x /tmp/sonic-annotator.AppImage \
-    && cd /tmp \
-    && ./sonic-annotator.AppImage --appimage-extract \
-    && mv /tmp/squashfs-root /opt/sonic-annotator \
+    && OFFSET="$(grep -oba "hsqs" /tmp/sonic-annotator.AppImage | head -1 | cut -d: -f1)" \
+    && test -n "$OFFSET" \
+    && tail -c +$((OFFSET + 1)) /tmp/sonic-annotator.AppImage > /tmp/sonic-annotator.squashfs \
+    && unsquashfs -d /opt/sonic-annotator /tmp/sonic-annotator.squashfs >/dev/null \
     && test -x /opt/sonic-annotator/AppRun \
     && VAMP_PATH=/opt/vamp /opt/sonic-annotator/AppRun -l \
        | grep -Fq "vamp:nnls-chroma:chordino:simplechord"
