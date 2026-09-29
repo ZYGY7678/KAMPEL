@@ -514,11 +514,11 @@ app.post("/api/analyze",async function(req,res){
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
     currentStage="transcription";
     const transcript=await transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId);
-    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","התמלול הושלם; Gemini 1.5 Pro מנתח ישירות את האודיו לזיהוי אקורדים, סולם, קצב ומילים");
-    const chordDetectorContext="\\n\\nCHORD DETECTION: Identify every chord directly from the supplied audio using Gemini 1.5 Pro's audio understanding. The audio itself is the source of truth. Do not rely on a separate local chord detector, lyrics, key, genre, or familiar progressions. Analyze bass, harmony, voicing and chord changes throughout the entire recording, including instrumental transitions.";
+    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","התמלול הושלם; Gemini 3.8 Flash מנתח ישירות את האודיו לזיהוי אקורדים, סולם, קצב ומילים");
+    const chordDetectorContext="\\n\\nCHORD DETECTION: Identify every chord directly from the supplied audio using Gemini 3.8 Flash's audio understanding. The audio itself is the source of truth. Do not rely on a separate local chord detector, lyrics, key, genre, or familiar progressions. Analyze bass, harmony, voicing and chord changes throughout the entire recording, including instrumental transitions.";
     const transcriptContext="\n\nVERBATIM TRANSCRIPT FROM "+TRANSCRIBE_MODEL+" (use this as the primary source for lyric wording and word timing; correct only when the attached audio clearly contradicts it):\n"+transcript+"\n\nNow analyze the attached audio for harmony, chords, key, tempo, song sections and metadata. Return the complete required JSON schema, retaining the transcript wording and using its timestamps wherever supplied.";
     let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+chordDetectorContext+transcriptContext+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
-    logOperation(req.operationId,"analysis_primary_completed","הניתוח הראשוני הושלם; זוהו "+(first.lines||[]).length+" שורות ו-"+(first.chords||[]).length+" אקורדים; הזיהוי בוצע ישירות על ידי Gemini 1.5 Pro");
+    logOperation(req.operationId,"analysis_primary_completed","הניתוח הראשוני הושלם; זוהו "+(first.lines||[]).length+" שורות ו-"+(first.chords||[]).length+" אקורדים; הזיהוי בוצע ישירות על ידי Gemini 3.8 Flash");
     logOperation(req.operationId,"analysis_ready","הניתוח הראשוני מוכן; ניתן להציג את המילים והאקורדים ולהפעיל אימות נוסף לפי בחירה");
     currentStage="history_save";
     let historyId="";
