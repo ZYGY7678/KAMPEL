@@ -6,7 +6,6 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 import Replicate from "replicate";
-import { detectChordsLocally } from "./chord-detector.js";
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from "docx";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -126,8 +125,11 @@ const upload = multer({
   limits: { fileSize: 200 * 1024 * 1024 }
 });
 
-const MODEL = "gemini-2.5-pro";
+const MODEL = "gemini-3.8-flash";
 const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
+const LOCAL_AUDIO_ENGINE_URL = String(process.env.LOCAL_AUDIO_ENGINE_URL || "").replace(/\/+$/, "");
+const LOCAL_AUDIO_ENGINE_TOKEN = String(process.env.LOCAL_AUDIO_ENGINE_TOKEN || "");
+const CHORDINO_ENGINE_TIMEOUT_MS = Math.max(30000, Number(process.env.CHORDINO_ENGINE_TIMEOUT_MS) || 240000);
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 
 const SCHEMA = {
@@ -185,29 +187,22 @@ const SCHEMA = {
 };
 
 const PRIMARY_PROMPT = [
-  "You are the music-analysis engine inside a professional song-to-chords-and-lyrics editor.",
-  "Analyze the entire attached audio from the first audible sample to the final audible sample. Do not analyze only a preview or the opening section.",
-  "The uploaded filename is provided separately as a clue for identifying the song title and artist. Use it carefully; do not treat an unverified filename as proof and do not invent metadata.",
-  "Return ONLY structured JSON matching the supplied schema.",
-  "",
-  "Perform a careful, high-effort transcription of the COMPLETE recording. Internally make multiple listening passes: first map song sections and vocal entrances, then transcribe every sung word in order, then re-check the entire vocal track against the audio. Include every verse, chorus, bridge, repeated section, intro/outro vocal, ad-lib and ending; never summarize or silently skip repeated lines. Distinguish lead vocals from backing vocals and instruments. Preserve the exact sung language and wording; do not replace unusual but audible words with familiar phrases. If a word is genuinely unclear, omit only that word and do not guess.",
-  "Return all detected lyric lines and the COMPLETE chord timeline for the full duration, including lyric-free instrumental passages. The chords array is independent of lyric words: never omit chords only because nobody is singing at that moment. In particular, treat every מעבר/transition as a required analysis section, not optional filler: explicitly scan the audio between each verse, chorus and bridge, plus every instrumental interlude, turnaround, intro, and outro. Detect each distinct audible chord change inside these passages and include it at its actual time in the independent chords array, even when there are no vocals or lyric words to anchor it. Do not collapse a multi-chord transition into one chord, skip short transitions, or infer a generic progression; use only changes supported by the audio. Ensure the final word and final chord events are covered through the end of the recording.",
-  "For every lyric word provide real start and end seconds on the original audio timeline.",
-  "For Hebrew, listen closely to consonants, syllable boundaries, grammatical context and the singer’s pronunciation. Add niqqud only when the pronunciation is supported by the audio; preserve exact words and natural punctuation. Re-check similar-sounding Hebrew words carefully and never choose a word merely because it makes a more familiar sentence.",
-  "HIGH-ACCURACY HARMONY ANALYSIS IS A TOP PRIORITY. Do not guess chords from the song title, lyrics, genre, key, common progressions, or what would sound musically typical. Listen to the actual harmonic content of the audio. Analyze the accompaniment and bass as well as the full mix; identify the notes that are genuinely sounding together, their stability, and how they resolve. Internally make at least three focused harmony passes: (1) map bass/root movement and likely harmonic rhythm, (2) inspect chord quality and voicing using the midrange/instrumental harmony, (3) re-check every proposed chord and change against the audio from beginning to end. Resolve disagreements between passes by choosing the chord best supported by audible notes; if the audio does not support a precise quality, use a simpler supported chord rather than inventing a seventh, suspension, extension, or slash bass.",
-  "Identify chord roots and chord quality separately. Distinguish major, minor, diminished, augmented, suspended, and extended chords only when their defining tones are audible and sufficiently clear. Do not confuse a melody note with a chord tone, a bass passing note with a new root, or a relative major/minor with the actual harmony. Check inversions and slash chords only when the bass note is clear and harmonically part of the chord. Do not force every chord to belong to the estimated key; detect borrowed chords, modulation, and chromatic changes only when supported by the recording. Use the key as a consistency check, never as a substitute for listening.",
-  "For each proposed chord event, internally verify that its root and quality fit the simultaneous audible notes and that the change time matches the actual harmonic change, not merely a lyric onset or beat. Compare adjacent events: remove duplicates, preserve genuine repeated returns after a different chord, and do not smooth over real changes. In dense or noisy mixes, prefer a defensible basic triad or mark lower confidence instead of reporting unsupported detail. Confidence must reflect acoustic certainty for that individual chord, not general confidence in the song transcription.",
-  "Chord rhythm and density: infer meter and harmonic rhythm from the recording rather than assuming 4/4. In a regular 4/4 passage, use one chord event per complete four-beat measure only when the harmony actually sustains that long; if the harmony changes earlier or later, place the event at the audible change. Do not create extra chord changes merely because a beat or lyric word occurs. Include multiple distinct chords within a measure only when each change is clearly audible. If the same chord sustains across measures, do not repeat its label on every beat or word; preserve a new event only when a distinct chord change or meaningful re-entry is heard.",
-  "Prefer standard chord names such as Bb, F#m7, Cmaj7, G/B.",
-  "Determine the overall key and BPM when possible. Also identify the capo fret used in the recording, if a capo is audible or indicated by the arrangement; return capo as an integer from 0 to 12, using 0 when no capo is used and null only when it cannot be determined. Do not confuse capo position with song key.",
-  "Preserve section boundaries and label them explicitly. For verses use the order of the song: first verse = בית א, second verse = בית ב, third verse = בית ג, and so on. Label every chorus/refrain as פזמון. Preserve other section types such as Intro, Pre-Chorus, Bridge and Outro. For instrumental transitions with no lyrics, do NOT omit their chords from the independent chords array; the UI will display those chord events as a dedicated מעבר block, so an empty lyric line is not required.",
-  "",
-  "Critical chord display rule: place a chord label only ONCE, at the first suitable sung word at or immediately after that chord change. Never repeat the same sustained chord above every subsequent word. Leave chord=null on words while the same chord continues; add a new anchor only when the harmony changes to a different chord. If the same chord returns after a different chord, anchor it again at its new entrance. Keep the complete chord timeline in the chords array independently of word anchors.",
-  "Re-check every chord change against the actual audio, especially around vocal entrances. Scan the entire audio timeline in order, not just selected excerpts.",
-  "Re-check word timestamps around every chord change.",
-  "Never fabricate timestamps. When uncertain, prefer omission over invented content.",
-  "Confidence must be a number from 0 to 1."
-].join("\\n");
+  "You are the FINAL reconciliation engine inside a professional song-to-chords-and-lyrics editor.",
+  "The attached audio is the source of truth. Return ONLY one complete JSON object matching the supplied schema.",
+  "This request contains TWO independent evidence streams that must be reconciled:",
+  "INPUT A — Gemini 3.5 Transcribe: a complete vocal transcription with word timing information when available. Use it as the primary evidence for lyric wording, repetitions, ad-libs, and vocal timing.",
+  "INPUT B — Chordino via Sonic Annotator: an independent chord timeline produced from the audio by the Chordino Vamp plugin. Treat these chord events as independent machine evidence, not as lyric guesses.",
+  "Do a final audio-grounded reconciliation. Re-listen mentally to the whole recording from the first audible sample to the final sample. Correct transcription evidence only when the audio clearly supports the correction, and never invent lyrics.",
+  "For chords, use the Chordino timeline as the starting evidence. Keep genuine Chordino changes, but correct an obvious Chordino artifact only when the attached audio supports the correction. Do not invent chords from lyrics, song title, key, genre, or a familiar progression.",
+  "Return the COMPLETE recording: every verse, chorus, bridge, repeated section, vocal ad-lib, intro/outro vocal, and every meaningful chord event across lyric-free transitions, interludes, turnarounds, intros and outros.",
+  "Preserve word-level start and end seconds on the original audio timeline. Keep all events chronological and within the true audio duration.",
+  "For Hebrew, preserve the exact sung words and only add niqqud when pronunciation is clearly supported by the audio. Keep natural punctuation only when supported by phrasing.",
+  "Determine the overall key, BPM and capo when supported by the audio. Capo must be an integer 0–12, or null only when genuinely uncertain.",
+  "Chord display rule: place a chord anchor only once at the first suitable word at or immediately after the harmonic change; sustained chords should not be repeated above every word. If a chord returns after a different chord, anchor it again. Keep the COMPLETE independent chord timeline in the chords array even when no lyrics are present.",
+  "Use standard chord names such as Bb, F#m7, Cmaj7 and G/B. Prefer a simpler supported chord over an unsupported extension or slash chord.",
+  "Confidence must be a number from 0 to 1 and should reflect the acoustic certainty of the final result.",
+  "Never summarize or stop early because of output length. Complete chronological coverage is mandatory."
+].join("\n");
 
 const VERIFY_PREFIX = [
   "You are the second, independent verification pass for a professional chord-and-lyrics extraction system.",
@@ -365,7 +360,21 @@ function cleanAnalysis(value) {
   };
 }
 
-app.get("/api/health",function(_req,res){res.json({ok:true,model:MODEL,auth:"google-and-email-password",googleOAuthConfigured:Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET),stripeConfigured:false,chordDetector:MODEL,chordDetectorConfigured:true,replicateConfigured:Boolean(process.env.REPLICATE_API_TOKEN),supabaseConfigured:supabaseReady(),persistence:supabaseReady()?"supabase":"local-fallback",apiKeyRequired:true,dailyLimit:null});});
+app.get("/api/health",function(_req,res){res.json({
+  ok:true,
+  model:MODEL,
+  transcriptionModel:TRANSCRIBE_MODEL,
+  auth:"google-and-email-password",
+  googleOAuthConfigured:Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET),
+  stripeConfigured:Boolean(process.env.STRIPE_SECRET_KEY),
+  chordinoConfigured:Boolean(LOCAL_AUDIO_ENGINE_URL&&LOCAL_AUDIO_ENGINE_TOKEN),
+  chordinoEngine:LOCAL_AUDIO_ENGINE_URL||"",
+  replicateConfigured:Boolean(process.env.REPLICATE_API_TOKEN),
+  supabaseConfigured:supabaseReady(),
+  persistence:supabaseReady()?"supabase":"local-fallback",
+  apiKeyRequired:true,
+  dailyLimit:null
+});});
 
 app.get("/auth/google",function(_req,res){if(!requireGoogleOAuth(res))return;const state=crypto.randomBytes(24).toString("hex");oauthStates.set(state,Date.now());const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:APP_URL+"/auth/google/callback",response_type:"code",scope:OAUTH_SCOPES,state:state});res.redirect("https://accounts.google.com/o/oauth2/v2/auth?"+params.toString());});
 app.get("/auth/google/callback",async function(req,res){const state=String(req.query.state||""),code=String(req.query.code||""),created=oauthStates.get(state);oauthStates.delete(state);if(!created||Date.now()-created>10*60*1000||!code)return res.status(400).send("Google authentication state expired or invalid");try{const tokenRes=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:code,client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:APP_URL+"/auth/google/callback",grant_type:"authorization_code"})}),tokens=await tokenRes.json();if(!tokenRes.ok||!tokens.access_token)throw new Error(tokens.error_description||"Google token exchange failed");const userRes=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+tokens.access_token}}),user=await userRes.json();if(!userRes.ok||!user.sub||user.email_verified!==true)throw new Error("Google user info failed or email is not verified");const sessionId=crypto.randomBytes(32).toString("hex"),userData={id:String(user.sub),name:user.name||user.email||"Google user",email:normalizeEmail(user.email),picture:user.picture||""};if(supabaseReady()){const accountId=await ensureAccount(userData);userData.accountId=accountId;await sb("auth_sessions","POST",{token_hash:tokenHash(sessionId),account_id:accountId,expires_at:new Date(Date.now()+2592000000).toISOString()});}else{sessions.set(sessionId,{user:userData,premium:false,premiumCheckedAt:0,createdAt:Date.now()});}setSessionCookie(res,sessionId);res.redirect("/");}catch(error){console.error(error);res.status(500).send("Google authentication failed");}});
@@ -393,70 +402,114 @@ async function requireUploadAccess(req,res,options){
 }
 
 async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue){
-  const startedAt=Date.now();
-  logOperation(operationIdValue,"transcription_started","מתחיל תמלול מלא באמצעות "+TRANSCRIBE_MODEL);
-  const controller=new AbortController();
-  const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
-  const timeout=setTimeout(function(){controller.abort();},timeoutMs);
+  const startedAt=Date.now(),maxRetries=10,retryDelayMs=60000;
+  for(let attempt=0;;attempt++){
+    const controller=new AbortController();
+    const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
+    const timeout=setTimeout(function(){controller.abort();},timeoutMs);
+    try{
+      logOperation(operationIdValue,"transcription_started","מתחיל תמלול מלא באמצעות "+TRANSCRIBE_MODEL+"; ניסיון "+(attempt+1));
+      const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(TRANSCRIBE_MODEL)+":generateContent",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+        body:JSON.stringify({
+          contents:[{role:"user",parts:[
+            {text:"Transcribe the ENTIRE attached recording verbatim in the sung/spoken language. Perform a complete scan from beginning to end, preserving every verse, chorus repetition, instrumental vocal, ad-lib and ending. Return word-level timestamps when available. Do not summarize and do not omit later sections."},
+            {inline_data:{mime_type:mimeType,data:audioBase64}}
+          ]}],
+          generationConfig:{audioTranscriptionConfig:{wordTimestamp:true}}
+        }),
+        signal:controller.signal
+      });
+      const raw=await response.text();let data={};
+      try{data=raw?JSON.parse(raw):{};}catch{
+        const e=new Error("Gemini Transcribe החזיר תשובה שאינה JSON תקין");
+        e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";throw e;
+      }
+      if(!response.ok){
+        const e=new Error(data&&data.error&&data.error.message||"Gemini Transcribe request failed");
+        e.geminiStatus=response.status;e.geminiCode=data&&data.error&&data.error.status||"";e.geminiApiCode=data&&data.error&&data.error.code||null;
+        e.retryAfterSeconds=Number(response.headers.get("retry-after"))||0;throw e;
+      }
+      const transcript=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)
+        ?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join("")
+        :"";
+      if(!transcript.trim()){
+        const e=new Error("Gemini Transcribe החזיר תמלול ריק");
+        e.geminiStatus=response.status;e.geminiCode="EMPTY_TRANSCRIPT";throw e;
+      }
+      logOperation(operationIdValue,"transcription_completed","התמלול המלא הושלם באמצעות "+TRANSCRIBE_MODEL+"; משך "+(Date.now()-startedAt)+"ms");
+      return transcript;
+    }catch(error){
+      const overload=Number(error&&error.geminiStatus)===429||Number(error&&error.geminiStatus)===503||/RESOURCE_EXHAUSTED|UNAVAILABLE|overload|overloaded|high demand|rate.?limit/i.test(String(error&&error.geminiCode||"")+" "+String(error&&error.message||""));
+      if(overload&&attempt<maxRetries){
+        logOperation(operationIdValue,"transcription_overload_retry","Gemini Transcribe עמוס או הגביל בקשות; ניסיון "+(attempt+1)+" נכשל. ניסיון חוזר "+(attempt+2)+" מתוך "+(maxRetries+1)+" בעוד דקה","warning");
+        await new Promise(function(resolve){setTimeout(resolve,retryDelayMs);});
+        continue;
+      }
+      const message=error&&error.name==="AbortError"?"בקשת התמלול חרגה ממגבלת הזמן":"תמלול באמצעות Gemini נכשל";
+      logOperation(operationIdValue,"transcription_failed",message+"; מודל "+TRANSCRIBE_MODEL+"; HTTP "+(error&&error.geminiStatus||"לא התקבל")+"; ניסיונות "+(attempt+1)+"; פירוט: "+String(error&&error.message||error).slice(0,350),"error");
+      throw error;
+    }finally{
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function analyzeWithChordino(filePath,originalName,mimeType,operationIdValue){
+  if(!LOCAL_AUDIO_ENGINE_URL||!LOCAL_AUDIO_ENGINE_TOKEN){
+    const error=new Error("שירות Chordino לא מוגדר בשרת. חסרים LOCAL_AUDIO_ENGINE_URL או LOCAL_AUDIO_ENGINE_TOKEN.");
+    error.code="CHORDINO_NOT_CONFIGURED";
+    logOperation(operationIdValue,"chordino_not_configured",error.message,"error");
+    throw error;
+  }
+  const startedAt=Date.now(),controller=new AbortController();
+  const timeout=setTimeout(function(){controller.abort();},CHORDINO_ENGINE_TIMEOUT_MS);
   try{
-    const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(TRANSCRIBE_MODEL)+":generateContent",{
+    logOperation(operationIdValue,"chordino_started","שולחים את האודיו למנוע Sonic Annotator + Chordino");
+    const bytes=await fs.readFile(filePath),form=new FormData();
+    form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
+    const response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
       method:"POST",
-      headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
-      body:JSON.stringify({
-        contents:[{role:"user",parts:[{text:"Transcribe all audible singing and spoken words verbatim in the original language. Perform TWO complete scans of the entire audio: on the first scan, map every vocal entry and transcribe all words; on the second scan, replay/review the entire recording from beginning to end and compare it against the draft to catch omitted words, repeated lines, ad-libs, quiet vocals, and incorrect word-level timestamps. Do not stop after the first pass and do not skip any section. Preserve repetitions and vocal ad-libs. Return the complete transcript with word-level timestamps when available."},{inline_data:{mime_type:mimeType,data:audioBase64}}]}],
-        generationConfig:{audioTranscriptionConfig:{wordTimestamp:true}}
-      }),
+      headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
+      body:form,
       signal:controller.signal
     });
     const raw=await response.text();let data={};
-    try{data=raw?JSON.parse(raw):{};}catch{const e=new Error("Gemini Transcribe החזיר תשובה שאינה JSON תקין");e.geminiStatus=response.status;throw e;}
-    if(!response.ok){const e=new Error(data&&data.error&&data.error.message||"Gemini Transcribe request failed");e.geminiStatus=response.status;e.geminiCode=data&&data.error&&data.error.status||"";throw e;}
-    const transcript=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join(""):"";
-    if(!transcript.trim()){const e=new Error("Gemini Transcribe החזיר תמלול ריק");e.geminiStatus=response.status;e.geminiCode="EMPTY_TRANSCRIPT";throw e;}
-    logOperation(operationIdValue,"transcription_completed","התמלול הושלם באמצעות "+TRANSCRIBE_MODEL+"; משך "+(Date.now()-startedAt)+"ms");
-    return transcript;
+    try{data=raw?JSON.parse(raw):{};}catch{
+      const error=new Error("שירות Chordino החזיר תשובה שאינה JSON תקין");
+      error.chordinoStatus=response.status;throw error;
+    }
+    if(!response.ok){
+      const error=new Error(data&&data.detail||data&&data.error||"שירות Chordino נכשל");
+      error.chordinoStatus=response.status;throw error;
+    }
+    const chords=Array.isArray(data.chords)?data.chords.map(function(chord){
+      return {
+        start:Math.max(0,Number(chord&&chord.start)||0),
+        end:Math.max(0,Number(chord&&chord.end)||0),
+        chord:String(chord&&chord.chord||"").trim()
+      };
+    }).filter(function(chord){
+      return chord.chord&&chord.end>=chord.start;
+    }).sort(function(a,b){return a.start-b.start;});
+    if(!chords.length){
+      const error=new Error("Chordino לא החזיר אף אירוע אקורד לקובץ.");
+      error.code="EMPTY_CHORDINO";throw error;
+    }
+    logOperation(operationIdValue,"chordino_completed","Chordino החזיר "+chords.length+" אירועי אקורד; משך "+(Date.now()-startedAt)+"ms");
+    return {
+      engine:String(data.engine||"sonic-annotator+chordino"),
+      duration:Number(data.duration)||0,
+      chords:chords
+    };
   }catch(error){
-    const message=error&&error.name==="AbortError"?"בקשת התמלול חרגה ממגבלת הזמן":"תמלול באמצעות Gemini נכשל";
-    logOperation(operationIdValue,"transcription_failed",message+"; מודל "+TRANSCRIBE_MODEL+"; HTTP "+(error&&error.geminiStatus||"לא התקבל")+"; פירוט: "+String(error&&error.message||error).slice(0,350),"error");
+    const message=error&&error.name==="AbortError"?"עיבוד Chordino חרג ממגבלת הזמן":"עיבוד Chordino נכשל";
+    logOperation(operationIdValue,"chordino_failed",message+"; HTTP "+(error&&error.chordinoStatus||"לא התקבל")+"; פירוט: "+String(error&&error.message||error).slice(0,350),"error");
     throw error;
-  }finally{clearTimeout(timeout);}
-}
-
-async function organizeAnalysisWithGemini(apiKey,candidate,operationIdValue){
- const startedAt=Date.now();
- logOperation(operationIdValue,"gemini_organize_started","המודל הראשון סיים; שולחים את התמלול והאקורדים ל-Gemini לסידור ואיחוד התוצאה");
- const prompt=[
-  "You are the final formatting and consistency stage in a two-model song analysis pipeline.",
-  "The JSON below is the complete output from the first analysis model, including lyric transcription, word timestamps, chord events, key, tempo, sections and metadata.",
-  "Organize and normalize this information into the exact supplied JSON schema so it is clear and consistent for display in a lyrics-and-chords editor.",
-  "CRITICAL: Treat the candidate JSON as the source of truth. This is NOT a new audio analysis. Do not infer, research, rewrite, translate, correct, add, remove, or guess any lyrics or chords.",
-  "Preserve every lyric word, punctuation mark, section, chord, chord event, timestamp, confidence value, and metadata value exactly as provided, except harmless schema normalization.",
-  "Keep all word and chord events chronological. Preserve all instrumental chord events and repeated lines. Do not merge or omit chord changes.",
-  "Return only the complete JSON object matching the supplied schema.",
-  "FIRST MODEL RESULT:",
-  JSON.stringify(candidate)
- ].join("\\n");
- const controller=new AbortController();
- const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
- const timeout=setTimeout(function(){controller.abort();},timeoutMs);
- try{
-  const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent",{
-   method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
-   body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{responseMimeType:"application/json",responseSchema:SCHEMA}}),signal:controller.signal
-  });
-  const raw=await response.text();let data={};
-  try{data=raw?JSON.parse(raw):{};}catch(parseError){const e=new Error("Gemini סידור החזיר תשובה שאינה JSON תקין");e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";throw e;}
-  if(!response.ok){const e=new Error(data&&data.error&&data.error.message||"Gemini organization failed");e.geminiStatus=response.status;e.geminiCode=data&&data.error&&data.error.status||"";throw e;}
-  const outputText=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join(""):"";
-  if(!outputText.trim()){const e=new Error("Gemini סידור החזיר תשובה ריקה");e.geminiStatus=response.status;e.geminiCode="EMPTY_RESPONSE";throw e;}
-  let parsed;try{parsed=JSON.parse(outputText);}catch(parseError){const e=new Error("Gemini סידור החזיר JSON לא תקין: "+String(parseError.message||parseError).slice(0,180));e.geminiStatus=response.status;e.geminiCode="INVALID_MODEL_JSON";throw e;}
-  logOperation(operationIdValue,"gemini_organize_completed","Gemini סידר את תוצאות המודל הראשון; משך "+(Date.now()-startedAt)+"ms");
-  return parsed;
- }catch(error){
-  const message=error&&error.name==="AbortError"?"שלב סידור התוצאה ב-Gemini חרג ממגבלת הזמן":"שלב סידור התוצאה ב-Gemini נכשל";
-  logOperation(operationIdValue,"gemini_organize_failed",message+"; HTTP "+(error&&error.geminiStatus||"לא התקבל")+"; פירוט: "+String(error&&error.message||error).slice(0,350),"error");
-  throw error;
- }finally{clearTimeout(timeout);}
+  }finally{
+    clearTimeout(timeout);
+  }
 }
 
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
@@ -541,39 +594,56 @@ app.post("/api/analyze",async function(req,res){
     return res.status(400).json({error:"לא התקבל קובץ אודיו. נסה לבחור את הקובץ שוב."});
    }
    try{
-    currentStage="file_validation";logOperation(req.operationId,"file_received","קובץ התקבל; בודקים גודל וסוג");
+    currentStage="file_validation";
+    logOperation(req.operationId,"file_received","קובץ התקבל; בודקים גודל וסוג");
     const stat=await fs.stat(req.file.path);
     logOperation(req.operationId,"file_stats","גודל הקובץ "+stat.size+" בתים; MIME "+String(req.file.mimetype||"לא צוין"));
     if(!stat.size)throw new Error("הקובץ שהתקבל ריק. בחר קובץ אודיו אחר.");
     if(stat.size>INLINE_AUDIO_MAX_BYTES)throw new Error("הקובץ גדול מדי לניתוח ב-Gemini (מקסימום 14MB).");
-    currentStage="audio_read";logOperation(req.operationId,"audio_read_started","קוראים את הקובץ ומכינים אותו לשליחה ל־Gemini");
-    const audioBase64=(await fs.readFile(req.file.path)).toString("base64"),mimeType=req.file.mimetype||"audio/mpeg",filenameHintValue=filenameHint(req.file.originalname||"");
+
+    currentStage="audio_read";
+    logOperation(req.operationId,"audio_read_started","קוראים את הקובץ ומכינים אותו לשליחה ל-Gemini");
+    const audioBase64=(await fs.readFile(req.file.path)).toString("base64");
+    const mimeType=req.file.mimetype||"audio/mpeg";
+    const filenameHintValue=filenameHint(req.file.originalname||"");
     logOperation(req.operationId,"audio_read_completed","הקובץ נקרא בהצלחה; גודל מקודד "+audioBase64.length+" תווים");
-    currentStage="metadata";logOperation(req.operationId,"metadata_started","מחלצים פרטי אודיו כגון משך, קצב דגימה ומידע מוטמע");
+
+    currentStage="metadata";
+    logOperation(req.operationId,"metadata_started","מחלצים פרטי אודיו כגון מידע מוטמע");
     const audioMetadata=await extractAudioMetadata(req.file.path);
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
-    currentStage="chord_detection";
-    const detectedChords=await detectChordsLocally(req.file.path,req.operationId,logOperation);
-    if(!detectedChords.length)throw new Error("Chord Engine לא החזיר אקורדים לקובץ הזה. בדוק את פורמט האודיו או את רכיב זיהוי האקורדים בשרת.");
-    logOperation(req.operationId,"chord_detection_ready","Chord Engine זיהה "+detectedChords.length+" אירועי אקורד; מעבירים אותם כנתוני האקורדים הסופיים");
-    currentStage="transcription";
-    const transcript=await transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId);
-    currentStage="analysis_primary";logOperation(req.operationId,"analysis_primary_started","התמלול הושלם; Gemini מנתח את המילים, המבנה, הסולם והקצב. זיהוי האקורדים נעשה בנפרד ב-Chord Engine");
-    const chordDetectorContext="\\n\\nCHORD DETECTION IS HANDLED EXCLUSIVELY BY THE SEPARATE Chord Engine SERVER MODULE. Do not identify, infer, revise, or generate chords from audio, lyrics, key, genre, or progressions. Set every word chord to null and return an empty chords array; the server will insert the independently detected Chord Engine chord timeline after organization.";
-    const transcriptContext="\\n\\nVERBATIM TRANSCRIPT FROM "+TRANSCRIBE_MODEL+" (use this as the primary source for lyric wording and word timing; correct only when the attached audio clearly contradicts it):\\n"+transcript+"\\n\\nAnalyze the attached audio for lyric alignment, key, tempo, song sections and metadata. Do not perform chord detection. Return the complete required JSON schema, retaining transcript wording and using its timestamps wherever supplied.";
-    let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+chordDetectorContext+transcriptContext+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
-    logOperation(req.operationId,"analysis_primary_completed","Gemini השלים את ניתוח המילים והמבנה; זוהו "+(first.lines||[]).length+" שורות");
-    currentStage="gemini_organize";
-    first=cleanAnalysis(await organizeAnalysisWithGemini(req.auth.apiKey,first,req.operationId));
-    first.chords=detectedChords.map(function(chord){return{start:Math.max(0,Number(chord.start)||0),end:Math.max(Number(chord.start)||0,Number(chord.end)||0),chord:String(chord.chord||"").trim(),confidence:Math.max(0,Math.min(1,Number(chord.confidence)||0))};}).filter(function(chord){return chord.chord;}).sort(function(a,b){return a.start-b.start;});
-    for(let i=0;i<first.chords.length;i++){const next=first.chords[i+1];if(first.duration)first.chords[i].end=Math.min(first.duration,Math.max(first.chords[i].start,next?next.start:first.chords[i].end));}
-    for(const line of first.lines||[]){for(const word of line.words||[]){const start=Number(word.start)||0,end=Math.max(start,Number(word.end)||start),midpoint=start+(end-start)/2;let active=null;for(const chord of first.chords){if(chord.start<=midpoint&&chord.end>=midpoint)active=chord;else if(chord.start>midpoint)break;}word.chord=active?active.chord:null;word.chordOffset=active?0:null;}}
-    logOperation(req.operationId,"chord_engine_applied","הוטמעו "+first.chords.length+" אירועי האקורד מ-Chord Engine ושויכו למילים לפי התזמון");
-    logOperation(req.operationId,"analysis_ready","המודל הראשון ו-Gemini השלימו את שני שלבי הניתוח והסידור; התוצאה מוכנה להצגה");
+
+    currentStage="evidence_collection";
+    logOperation(req.operationId,"evidence_collection_started","מריצים במקביל תמלול Gemini וניתוח אקורדים עצמאי של Chordino");
+    const evidence=await Promise.all([
+      transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
+      analyzeWithChordino(req.file.path,filenameHintValue,mimeType,req.operationId)
+    ]);
+    const transcript=evidence[0];
+    const chordino=evidence[1];
+    if(!Array.isArray(chordino.chords)||!chordino.chords.length)throw new Error("Chordino לא סיפק נתוני אקורדים");
+
+    currentStage="final_reconciliation";
+    logOperation(req.operationId,"final_reconciliation_started","שולחים ל-Gemini 3.8 Flash את התמלול ואת ציר האקורדים של Chordino כדי לסגור את התוצאה הסופית");
+    const reconciliationPrompt=PRIMARY_PROMPT+
+      metadataPromptBlock(filenameHintValue,audioMetadata)+
+      "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n"+
+      transcript+
+      "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+
+      JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords});
+    const finalAnalysis=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,reconciliationPrompt,req.operationId,"final_reconciliation"));
+    if(!(finalAnalysis.lines||[]).length && !(finalAnalysis.chords||[]).length)throw new Error("הניתוח הסופי של Gemini יצא ריק");
+    logOperation(req.operationId,"final_reconciliation_completed","Gemini 3.8 Flash שילב את התמלול ואת נתוני Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+(finalAnalysis.chords||[]).length+" אקורדים");
+
     currentStage="history_save";
     let historyId="";
-    if(supabaseReady()){logOperation(req.operationId,"history_save_started","שומרים את הניתוח בהיסטוריית החשבון");historyId=await saveAnalysisHistory(accountIdForUser(req.auth.session.user),first);logOperation(req.operationId,"history_save_completed","הניתוח נשמר בהיסטוריה"+(historyId?" (מזהה "+historyId+")":""));}
-    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:first,historyId:historyId,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
+    if(supabaseReady()){
+      logOperation(req.operationId,"history_save_started","שומרים את הניתוח בהיסטוריית החשבון");
+      historyId=await saveAnalysisHistory(accountIdForUser(req.auth.session.user),finalAnalysis);
+      logOperation(req.operationId,"history_save_completed","הניתוח נשמר בהיסטוריה"+(historyId?" (מזהה "+historyId+")":""));
+    }
+    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:finalAnalysis,historyId:historyId,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
+
     currentStage="quota_commit";
     let quotaStatus=null;
     if(usageReservation){
@@ -582,19 +652,28 @@ app.post("/api/analyze",async function(req,res){
       logOperation(req.operationId,"quota_commit_completed","המכסה היומית עודכנה");
       if(!req.auth.premium) quotaStatus=await getDailyUsage(accountIdForUser(req.auth.session.user));
     }
-    currentStage="response";logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה לדפדפן; משך כולל "+(Date.now()-startedAt)+"ms","success");
-    res.json({analysis:first,verificationAvailable:true,operationId:req.operationId,dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null});
+
+    currentStage="response";
+    logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה סופית לדפדפן; משך כולל "+(Date.now()-startedAt)+"ms","success");
+    res.json({analysis:finalAnalysis,verificationAvailable:true,operationId:req.operationId,dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null});
    }catch(error){
     if(usageReservation)await releaseDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.reservationKey);
-    let detail=String(error&&error.message||error);if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
-    logOperation(req.operationId,"failed","כשל בשלב "+currentStage+" לאחר "+(Date.now()-startedAt)+"ms; HTTP 500; קוד "+String(error&&error.geminiCode||error&&error.code||"לא זמין")+"; פירוט: "+detail.slice(0,500),"error");
-    res.status(500).json({error:detail?"Gemini: "+detail:"ניתוח השיר נכשל",operationId:req.operationId,stage:currentStage});
-   }finally{try{await fs.unlink(req.file.path);logOperation(req.operationId,"temporary_file_removed","קובץ העבודה הזמני נמחק");}catch(cleanupError){logOperation(req.operationId,"cleanup_warning","לא ניתן היה למחוק קובץ זמני: "+String(cleanupError.message||cleanupError).slice(0,180),"error");}}
+    let detail=String(error&&error.message||error);
+    if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
+    const prefix=currentStage==="chordino"||currentStage==="evidence_collection"?"ניתוח אודיו/Chordino: ":"Gemini: ";
+    const status=currentStage==="chordino"||currentStage==="evidence_collection"?502:500;
+    logOperation(req.operationId,"failed","כשל בשלב "+currentStage+" לאחר "+(Date.now()-startedAt)+"ms; HTTP "+status+"; קוד "+String(error&&error.geminiCode||error&&error.code||"לא זמין")+"; פירוט: "+detail.slice(0,500),"error");
+    res.status(status).json({error:prefix+(detail||"ניתוח השיר נכשל"),operationId:req.operationId,stage:currentStage});
+   }finally{
+    try{await fs.unlink(req.file.path);logOperation(req.operationId,"temporary_file_removed","קובץ העבודה הזמני נמחק");}
+    catch(cleanupError){logOperation(req.operationId,"cleanup_warning","לא ניתן היה למחוק קובץ זמני: "+String(cleanupError.message||cleanupError).slice(0,180),"error");}
+   }
   });
  }catch(error){
-  let detail=String(error&&error.message||error);if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
+  let detail=String(error&&error.message||error);
+  if(req.auth&&req.auth.apiKey)detail=detail.split(req.auth.apiKey).join("[מפתח מוסתר]");
   logOperation(req.operationId,"failed","כשל לפני עיבוד הקובץ בשלב "+currentStage+"; HTTP 500; פירוט: "+detail.slice(0,500),"error");
-  if(!res.headersSent)res.status(500).json({error:detail||"שגיאת שרת",operationId:req.operationId,stage:currentStage});
+  if(!res.headersSent)res.status(500).json({error:"Gemini: "+(detail||"שגיאת שרת"),operationId:req.operationId,stage:currentStage});
  }
 });
 
