@@ -419,6 +419,43 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
   }finally{clearTimeout(timeout);}
 }
 
+async function organizeAnalysisWithGemini(apiKey,candidate,operationIdValue){
+ const startedAt=Date.now();
+ logOperation(operationIdValue,"gemini_organize_started","המודל הראשון סיים; שולחים את התמלול והאקורדים ל-Gemini לסידור ואיחוד התוצאה");
+ const prompt=[
+  "You are the final formatting and consistency stage in a two-model song analysis pipeline.",
+  "The JSON below is the complete output from the first analysis model, including lyric transcription, word timestamps, chord events, key, tempo, sections and metadata.",
+  "Organize and normalize this information into the exact supplied JSON schema so it is clear and consistent for display in a lyrics-and-chords editor.",
+  "CRITICAL: Treat the candidate JSON as the source of truth. This is NOT a new audio analysis. Do not infer, research, rewrite, translate, correct, add, remove, or guess any lyrics or chords.",
+  "Preserve every lyric word, punctuation mark, section, chord, chord event, timestamp, confidence value, and metadata value exactly as provided, except harmless schema normalization.",
+  "Keep all word and chord events chronological. Preserve all instrumental chord events and repeated lines. Do not merge or omit chord changes.",
+  "Return only the complete JSON object matching the supplied schema.",
+  "FIRST MODEL RESULT:",
+  JSON.stringify(candidate)
+ ].join("\\n");
+ const controller=new AbortController();
+ const timeoutMs=Math.max(30000,Number(process.env.GEMINI_TIMEOUT_MS)||240000);
+ const timeout=setTimeout(function(){controller.abort();},timeoutMs);
+ try{
+  const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent",{
+   method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+   body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{responseMimeType:"application/json",responseSchema:SCHEMA}}),signal:controller.signal
+  });
+  const raw=await response.text();let data={};
+  try{data=raw?JSON.parse(raw):{};}catch(parseError){const e=new Error("Gemini סידור החזיר תשובה שאינה JSON תקין");e.geminiStatus=response.status;e.geminiCode="INVALID_JSON";throw e;}
+  if(!response.ok){const e=new Error(data&&data.error&&data.error.message||"Gemini organization failed");e.geminiStatus=response.status;e.geminiCode=data&&data.error&&data.error.status||"";throw e;}
+  const outputText=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join(""):"";
+  if(!outputText.trim()){const e=new Error("Gemini סידור החזיר תשובה ריקה");e.geminiStatus=response.status;e.geminiCode="EMPTY_RESPONSE";throw e;}
+  let parsed;try{parsed=JSON.parse(outputText);}catch(parseError){const e=new Error("Gemini סידור החזיר JSON לא תקין: "+String(parseError.message||parseError).slice(0,180));e.geminiStatus=response.status;e.geminiCode="INVALID_MODEL_JSON";throw e;}
+  logOperation(operationIdValue,"gemini_organize_completed","Gemini סידר את תוצאות המודל הראשון; משך "+(Date.now()-startedAt)+"ms");
+  return parsed;
+ }catch(error){
+  const message=error&&error.name==="AbortError"?"שלב סידור התוצאה ב-Gemini חרג ממגבלת הזמן":"שלב סידור התוצאה ב-Gemini נכשל";
+  logOperation(operationIdValue,"gemini_organize_failed",message+"; HTTP "+(error&&error.geminiStatus||"לא התקבל")+"; פירוט: "+String(error&&error.message||error).slice(0,350),"error");
+  throw error;
+ }finally{clearTimeout(timeout);}
+}
+
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
  const startedAt=Date.now(),maxRetries=10,retryDelayMs=60000;
  for(let attempt=0;;attempt++){
@@ -518,8 +555,10 @@ app.post("/api/analyze",async function(req,res){
     const chordDetectorContext="\\n\\nCHORD DETECTION: Identify every chord directly from the supplied audio using Gemini 3.8 Flash's audio understanding. The audio itself is the source of truth. Do not rely on a separate local chord detector, lyrics, key, genre, or familiar progressions. Analyze bass, harmony, voicing and chord changes throughout the entire recording, including instrumental transitions.";
     const transcriptContext="\n\nVERBATIM TRANSCRIPT FROM "+TRANSCRIBE_MODEL+" (use this as the primary source for lyric wording and word timing; correct only when the attached audio clearly contradicts it):\n"+transcript+"\n\nNow analyze the attached audio for harmony, chords, key, tempo, song sections and metadata. Return the complete required JSON schema, retaining the transcript wording and using its timestamps wherever supplied.";
     let first=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,PRIMARY_PROMPT+chordDetectorContext+transcriptContext+metadataPromptBlock(filenameHintValue,audioMetadata),req.operationId,"analysis_primary"));
-    logOperation(req.operationId,"analysis_primary_completed","הניתוח הראשוני הושלם; זוהו "+(first.lines||[]).length+" שורות ו-"+(first.chords||[]).length+" אקורדים; הזיהוי בוצע ישירות על ידי Gemini 3.8 Flash");
-    logOperation(req.operationId,"analysis_ready","הניתוח הראשוני מוכן; ניתן להציג את המילים והאקורדים ולהפעיל אימות נוסף לפי בחירה");
+    logOperation(req.operationId,"analysis_primary_completed","המודל הראשון השלים את זיהוי המילים והאקורדים; זוהו "+(first.lines||[]).length+" שורות ו-"+(first.chords||[]).length+" אירועי אקורד");
+    currentStage="gemini_organize";
+    first=cleanAnalysis(await organizeAnalysisWithGemini(req.auth.apiKey,first,req.operationId));
+    logOperation(req.operationId,"analysis_ready","המודל הראשון ו-Gemini השלימו את שני שלבי הניתוח והסידור; התוצאה מוכנה להצגה");
     currentStage="history_save";
     let historyId="";
     if(supabaseReady()){logOperation(req.operationId,"history_save_started","שומרים את הניתוח בהיסטוריית החשבון");historyId=await saveAnalysisHistory(accountIdForUser(req.auth.session.user),first);logOperation(req.operationId,"history_save_completed","הניתוח נשמר בהיסטוריה"+(historyId?" (מזהה "+historyId+")":""));}
