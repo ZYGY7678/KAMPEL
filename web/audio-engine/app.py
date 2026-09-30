@@ -147,8 +147,8 @@ def _run_chordino(path: str, duration: float) -> list[dict]:
         events[-1]["end"] = round(duration, 3)
 
     # Smooth brief recognition flicker, then merge adjacent identical labels.
-    min_event = max(0.10, float(os.getenv("CHORDINO_MIN_EVENT_SECONDS", "0.30")))
-    merge_gap = max(0.0, float(os.getenv("CHORDINO_MERGE_GAP_SECONDS", "0.12")))
+    min_event = max(0.10, float(os.getenv("CHORDINO_MIN_EVENT_SECONDS", "0.45")))
+    merge_gap = max(0.0, float(os.getenv("CHORDINO_MERGE_GAP_SECONDS", "0.45")))
     smoothed = events[:]
     changed = True
     while changed and len(smoothed) > 1:
