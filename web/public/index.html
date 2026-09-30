@@ -521,7 +521,7 @@ function chordDifficultyForEasyVersion(chord){
     var rootScoreMinor={Am:0.03,Em:0.03,Dm:0.12,Bm:0.8,Fm:0.9,"F#m":0.9,"C#m":0.95,Gm:0.55,Cm:0.55,"G#m":0.95};
     score+=(isMinor?(rootScoreMinor[root+"m"]??1.0):(rootScoreMajor[root]??0.85));
   }
-  if(/dim|°|aug|+/.test(lower))score+=1.7;
+  if(/dim|°|aug|\+/.test(lower))score+=1.7;
   else if(/9|11|13|add9/.test(lower))score+=1.4;
   else if(/maj7|m7/.test(lower))score+=1.0;
   else if(/^7/.test(lower)||/sus[24]/.test(lower))score+=0.55;
