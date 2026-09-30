@@ -414,6 +414,7 @@ function uploadGateReason(){
   var resetAt=accountState.weeklyResetAt||accountState.dailyResetAt;
   if(!accountState.authenticated)return "יש להתחבר עם חשבון לפני העלאת קובץ";
   if(!currentApiKey())return "יש להזין מפתח Gemini API לפני העלאת קובץ";
+  if(!accountState.premium&&!Number.isFinite(remaining))return "בודקים את המכסה השבועית — המתן לרענון מצב החשבון";
   if(!accountState.premium&&Number.isFinite(remaining)&&remaining<=0&&resetAt)return "המכסה השבועית נוצלה — אפשר לנתח שוב בעוד "+formatQuotaCountdown(resetAt);
   return "";
 }
