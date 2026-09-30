@@ -899,11 +899,25 @@ app.post("/api/analyze",async function(req,res){
     logOperation(req.operationId,"final_reconciliation_completed","Gemini 3.8 Flash שילב את התמלול ואת נתוני Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+(finalAnalysis.chords||[]).length+" אקורדים");
 
     currentStage="history_save";
-    let historyId="";
+    let historyId="",savedAudioPath="";
     if(supabaseReady()){
-      logOperation(req.operationId,"history_save_started","שומרים את הניתוח בהיסטוריית החשבון");
-      historyId=await saveAnalysisHistory(accountIdForUser(req.auth.session.user),finalAnalysis);
-      logOperation(req.operationId,"history_save_completed","הניתוח נשמר בהיסטוריה"+(historyId?" (מזהה "+historyId+")":""));
+      const accountId=accountIdForUser(req.auth.session.user);
+      try{
+        logOperation(req.operationId,"song_storage_started","שומרים אוטומטית את קובץ השיר בחשבון");
+        savedAudioPath=await uploadSongToStorage(accountId,req.file.path,req.file.originalname||filenameHintValue,req.file.mimetype||mimeType);
+        logOperation(req.operationId,"song_storage_completed","קובץ השיר נשמר אוטומטית בחשבון");
+      }catch(storageError){
+        savedAudioPath="";
+        logOperation(req.operationId,"song_storage_warning","לא ניתן היה לשמור את קובץ האודיו ב-Storage; הניתוח יישמר בכל זאת. "+String(storageError&&storageError.message||storageError).slice(0,260),"warning");
+      }
+      logOperation(req.operationId,"history_save_started","שומרים את הניתוח ואת פרטי השיר בהיסטוריית החשבון");
+      try{
+        historyId=await saveAnalysisHistory(accountId,finalAnalysis,{audioPath:savedAudioPath,originalFilename:req.file.originalname||filenameHintValue,mimeType:req.file.mimetype||mimeType,fileSize:stat.size});
+      }catch(historyError){
+        if(savedAudioPath)await deleteSongFromStorage(savedAudioPath);
+        throw historyError;
+      }
+      logOperation(req.operationId,"history_save_completed","השיר נשמר אוטומטית בחשבון"+(historyId?" (מזהה "+historyId+")":""));
     }
     pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:finalAnalysis,historyId:historyId,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
 
@@ -918,7 +932,7 @@ app.post("/api/analyze",async function(req,res){
 
     currentStage="response";
     logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה סופית לדפדפן; משך כולל "+(Date.now()-startedAt)+"ms","success");
-    res.json({analysis:finalAnalysis,verificationAvailable:true,operationId:req.operationId,dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null,weeklyRemaining:quotaStatus?quotaStatus.remaining:null,weeklyResetAt:quotaStatus?quotaStatus.resetAt:null});
+    res.json({analysis:finalAnalysis,verificationAvailable:true,operationId:req.operationId,historyId:historyId,audioSaved:Boolean(savedAudioPath),dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null,weeklyRemaining:quotaStatus?quotaStatus.remaining:null,weeklyResetAt:quotaStatus?quotaStatus.resetAt:null});
    }catch(error){
     if(usageReservation)await releaseDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.reservationKey);
     let detail=String(error&&error.message||error);
