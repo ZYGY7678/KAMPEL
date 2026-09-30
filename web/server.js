@@ -175,6 +175,9 @@ const LOCAL_AUDIO_ENGINE_URL = String(process.env.LOCAL_AUDIO_ENGINE_URL || "").
 const LOCAL_AUDIO_ENGINE_TOKEN = String(process.env.LOCAL_AUDIO_ENGINE_TOKEN || "");
 const CHORDINO_ENGINE_TIMEOUT_MS = Math.max(30000, Number(process.env.CHORDINO_ENGINE_TIMEOUT_MS) || 240000);
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
+const SONG_STORAGE_BUCKET = "chord-studio-songs";
+const SONG_SEARCH_MODEL = "gemini-flash-lite-latest";
+const SONG_DOWNLOADER_URL = "https://ssyt.rip/he/";
 
 const SCHEMA = {
   type: "object",
