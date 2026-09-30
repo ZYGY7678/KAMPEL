@@ -889,25 +889,28 @@ app.post("/api/analyze",async function(req,res){
 
     currentStage="evidence_collection";
     logOperation(req.operationId,"evidence_collection_started","מריצים במקביל תמלול Gemini וניתוח אקורדים עצמאי של Chordino");
-    const evidence=await Promise.all([
+    const evidence=await Promise.allSettled([
       transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
       analyzeWithChordino(req.file.path,filenameHintValue,mimeType,req.operationId)
     ]);
-    const transcript=evidence[0];
-    const chordino=evidence[1];
-    if(!Array.isArray(chordino.chords)||!chordino.chords.length)throw new Error("Chordino לא סיפק נתוני אקורדים");
+    if(evidence[0].status!=="fulfilled")throw evidence[0].reason;
+    const transcript=evidence[0].value;
+    const chordino=evidence[1].status==="fulfilled"?evidence[1].value:null;
+    const hasChordino=Boolean(chordino&&Array.isArray(chordino.chords)&&chordino.chords.length);
+    if(!hasChordino)logOperation(req.operationId,"chordino_fallback","Chordino לא זמין כרגע; ממשיכים בניתוח ישירות באמצעות Gemini על בסיס האודיו והתמלול","warning");
 
     currentStage="final_reconciliation";
-    logOperation(req.operationId,"final_reconciliation_started","שולחים ל-Gemini 3.8 Flash את התמלול ואת ציר האקורדים של Chordino כדי לסגור את התוצאה הסופית");
+    logOperation(req.operationId,"final_reconciliation_started",hasChordino?"שולחים ל-Gemini 3.8 Flash את התמלול ואת ציר האקורדים של Chordino":"Chordino לא החזיר תוצאה; שולחים ל-Gemini ניתוח ישיר של האודיו והתמלול");
     const reconciliationPrompt=PRIMARY_PROMPT+
       metadataPromptBlock(filenameHintValue,audioMetadata)+
       "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n"+
       transcript+
-      "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+
-      JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords});
+      (hasChordino
+        ?"\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords})
+        :"\n\nCHORD TIMELINE FALLBACK:\nChordino is unavailable for this request. Analyze the attached audio directly to identify the actual chords and estimate their start/end times. Return the full chord timeline in the required schema; do not omit chords merely because the independent Chordino timeline is unavailable.");
     const finalAnalysis=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,reconciliationPrompt,req.operationId,"final_reconciliation"));
     if(!(finalAnalysis.lines||[]).length && !(finalAnalysis.chords||[]).length)throw new Error("הניתוח הסופי של Gemini יצא ריק");
-    logOperation(req.operationId,"final_reconciliation_completed","Gemini 3.8 Flash שילב את התמלול ואת נתוני Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+(finalAnalysis.chords||[]).length+" אקורדים");
+    logOperation(req.operationId,"final_reconciliation_completed",(hasChordino?"Gemini 3.8 Flash שילב את התמלול ואת נתוני Chordino: ":"Gemini 3.8 Flash השלים ניתוח ישיר ללא Chordino: ")+(finalAnalysis.lines||[]).length+" שורות, "+(finalAnalysis.chords||[]).length+" אקורדים");
 
     currentStage="history_save";
     let historyId="",savedAudioPath="";
