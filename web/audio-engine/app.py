@@ -146,21 +146,64 @@ def _run_chordino(path: str, duration: float) -> list[dict]:
     if duration > 0 and events[-1]["end"] <= events[-1]["start"]:
         events[-1]["end"] = round(duration, 3)
 
+    # Smooth brief recognition flicker, then merge adjacent identical labels.
+    min_event = max(0.10, float(os.getenv("CHORDINO_MIN_EVENT_SECONDS", "0.30")))
+    merge_gap = max(0.0, float(os.getenv("CHORDINO_MERGE_GAP_SECONDS", "0.12")))
+    smoothed = events[:]
+    changed = True
+    while changed and len(smoothed) > 1:
+        changed = False
+        for index, event in enumerate(smoothed):
+            if event["end"] - event["start"] >= min_event:
+                continue
+            left = smoothed[index - 1] if index > 0 else None
+            right = smoothed[index + 1] if index + 1 < len(smoothed) else None
+            if left and right and left["chord"] == right["chord"]:
+                left["end"] = max(left["end"], right["end"], event["end"])
+                smoothed.pop(index + 1)
+                smoothed.pop(index)
+            elif left and right:
+                target = left if (left["end"] - left["start"]) >= (right["end"] - right["start"]) else right
+                target["end"] = max(target["end"], event["end"]) if target is left else target["end"]
+                if target is right:
+                    target["start"] = min(target["start"], event["start"])
+                smoothed.pop(index)
+            elif left:
+                left["end"] = max(left["end"], event["end"])
+                smoothed.pop(index)
+            elif right:
+                right["start"] = min(right["start"], event["start"])
+                smoothed.pop(index)
+            else:
+                continue
+            changed = True
+            break
+
     merged: list[dict] = []
-    for event in events:
+    for event in smoothed:
         if (
             merged
             and merged[-1]["chord"] == event["chord"]
-            and event["start"] <= merged[-1]["end"] + 0.05
+            and event["start"] <= merged[-1]["end"] + merge_gap
         ):
             merged[-1]["end"] = max(merged[-1]["end"], event["end"])
         else:
             merged.append(event)
 
-    if duration > 0 and merged[-1]["end"] < duration:
+    # Make timeline boundaries explicit and continuous; use the midpoint for
+    # overlapping detections and preserve the detector's start/end estimates.
+    for index in range(len(merged) - 1):
+        current, following = merged[index], merged[index + 1]
+        boundary = round((current["end"] + following["start"]) / 2, 3)
+        if following["start"] < current["end"]:
+            current["end"] = boundary
+            following["start"] = boundary
+        elif following["start"] - current["end"] <= merge_gap:
+            current["end"] = following["start"]
+    if duration > 0:
+        merged[0]["start"] = min(merged[0]["start"], 0.0)
         merged[-1]["end"] = round(duration, 3)
-
-    return merged
+    return [event for event in merged if event["end"] - event["start"] >= 0.05]
 
 
 def health_payload() -> dict:
