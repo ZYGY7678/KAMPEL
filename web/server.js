@@ -906,8 +906,22 @@ app.post("/api/analyze",async function(req,res){
       "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+
       JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords});
     const finalAnalysis=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,reconciliationPrompt,req.operationId,"final_reconciliation"));
-    if(!(finalAnalysis.lines||[]).length && !(finalAnalysis.chords||[]).length)throw new Error("הניתוח הסופי של Gemini יצא ריק");
-    logOperation(req.operationId,"final_reconciliation_completed","Gemini 3.8 Flash שילב את התמלול ואת נתוני Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+(finalAnalysis.chords||[]).length+" אקורדים");
+    if(!(finalAnalysis.lines||[]).length)throw new Error("הניתוח הסופי של Gemini לא החזיר תמלול");
+    // Chordino is the authoritative chord detector. Gemini contributes lyrics,
+    // metadata and key context only; never replace the detected chord timeline.
+    finalAnalysis.chords=chordino.chords.map(function(chord){
+      return {start:Math.max(0,Number(chord.start)||0),end:Math.max(0,Number(chord.end)||0),chord:String(chord.chord||"").trim(),confidence:0.8};
+    }).filter(function(chord){return chord.chord&&chord.end>chord.start;});
+    finalAnalysis.lines.forEach(function(line){
+      (line.words||[]).forEach(function(word){
+        const time=(Number(word.start)+Number(word.end))/2;
+        let active=null;
+        for(const chord of finalAnalysis.chords){if(chord.start<=time&&time<chord.end)active=chord;else if(chord.start>time)break;}
+        word.chord=active?active.chord:null;
+      });
+    });
+    if(!finalAnalysis.chords.length)throw new Error("Chordino לא סיפק ציר אקורדים תקין");
+    logOperation(req.operationId,"final_reconciliation_completed","התמלול והמטא-נתונים הושלמו; ציר האקורדים הסופי נלקח ישירות מ-Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+finalAnalysis.chords.length+" אקורדים");
 
     currentStage="history_save";
     let historyId="",savedAudioPath="";
