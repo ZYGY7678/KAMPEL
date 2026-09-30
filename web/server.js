@@ -1110,7 +1110,7 @@ app.listen(port, "0.0.0.0", async function() {
   } else {
     console.warn("Supabase persistence is not configured");
   }
-  if (process.env.SELF_TEST_ENABLED === "true") {
+  if (true) {
     const running = Array.from(selfTests.values()).find(function(item) { return item.status === "running"; });
     if (!running) {
       const id = "startup-" + crypto.randomBytes(8).toString("hex");
