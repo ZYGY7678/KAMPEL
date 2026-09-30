@@ -1101,6 +1101,7 @@ app.get("/api/self-test/status", function(req, res) {
 app.use(express.static(publicDir));
 
 const port = Number(process.env.PORT || 10000);
+
 app.listen(port, "0.0.0.0", async function() {
   console.log("Chord Studio listening on " + port);
   if (supabaseReady()) {
@@ -1108,5 +1109,22 @@ app.listen(port, "0.0.0.0", async function() {
     catch (error) { console.error("Supabase persistence check failed", String(error&&error.message||error)); }
   } else {
     console.warn("Supabase persistence is not configured");
+  }
+  if (process.env.SELF_TEST_ENABLED === "true") {
+    const running = Array.from(selfTests.values()).find(function(item) { return item.status === "running"; });
+    if (!running) {
+      const id = "startup-" + crypto.randomBytes(8).toString("hex");
+      selfTests.set(id, { id:id, status:"running", stage:"starting", message:"בדיקת שרת מלאה מתחילה אוטומטית", checks:{}, startedAt:Date.now(), updatedAt:Date.now() });
+      console.log("SELF_TEST_AUTOSTART", id);
+      runSelfTest(id).then(function() {
+        const state=selfTests.get(id);
+        const summary=state&&state.status==="completed"
+          ? {status:state.status,stage:state.stage,durationMs:state.durationMs,checks:state.checks,resultOk:Boolean(state.result&&state.result.ok)}
+          : {status:state&&state.status||"unknown",stage:state&&state.stage||"unknown",message:state&&state.message||""};
+        console.log("SELF_TEST_RESULT", JSON.stringify(summary));
+      }).catch(function(error) {
+        console.error("SELF_TEST_FATAL", String(error&&error.stack||error));
+      });
+    }
   }
 });
