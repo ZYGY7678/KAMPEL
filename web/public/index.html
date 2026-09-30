@@ -151,19 +151,37 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
     </nav>
     <div class="side-menu-content">
       <div id="sideSectionApi" class="side-section hidden">
-        <div class="side-section-title"><strong>🔑 הזנת מפתח API</strong><button class="ghost" type="button" onclick="openSideSection('api')">×</button></div>
-        <div id="sideApiHost"></div>
-      </div>
-      <div id="sideSectionPremium" class="side-section hidden">
-        <div class="side-section-title"><strong>⭐ Premium</strong><button class="ghost" type="button" onclick="openSideSection('premium')">×</button></div>
-        <div id="sidePremiumHost"></div>
-      </div>
-      <div id="sideSectionAdmin" class="side-section hidden">
-        <div class="side-section-title"><strong>🛠️ גישת מנהל</strong><button class="ghost" type="button" onclick="openSideSection('admin')">×</button></div>
-        <div id="sideAdminHost"></div>
-      </div>
-    </div>
-  </aside>
+<div class="side-section-title"><strong>🔑 הזנת מפתח API</strong><button class="ghost" type="button" onclick="hideSideSections()">×</button></div>
+<div class="card home-access-card" style="padding:16px;border-radius:16px;text-align:right">
+<div style="font-weight:700;margin-bottom:10px">גישה ל־Chord Studio</div>
+<div id="accountAccessStatus" style="color:#8da1b8;font-size:12px;line-height:1.6">1. היכנס או הירשם · 2. הזן מפתח Gemini API</div>
+<div id="apiAccessPanel" style="margin-top:12px">
+<label for="apiKeyInput" style="display:block;color:#9eb2c7;font-size:12px;margin-bottom:6px">מפתח Gemini API אישי — חובה לפני העלאת קובץ</label>
+<input id="apiKeyInput" type="password" autocomplete="off" placeholder="הדבק כאן את מפתח ה־API" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#071522;color:#edf5ff">
+<div class="access-links"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">יצירת מפתח ב־Google AI Studio ↗</a><span>·</span><a href="https://mitmachim.top/post/1207480" target="_blank" rel="noopener">המדריך שלי להוצאת מפתח API ↗</a></div>
+</div>
+<div id="uploadGateMessage" class="gate-note">יש להתחבר עם Google ולהזין מפתח Gemini API כדי להעלות קובץ</div>
+</div>
+</div><div id="sideSectionPremium" class="side-section hidden">
+<div class="side-section-title"><strong>⭐ Premium</strong><button class="ghost" type="button" onclick="hideSideSections()">×</button></div>
+<div id="planPanel" class="plan-panel">
+<div class="plan-head"><strong>מצב החשבון</strong><span id="planBadge" class="plan-badge">מצב רגיל</span></div>
+<p id="planDescription">כל התכונות פתוחות בחינם, ללא מכסה יומית וללא מסלול Premium.</p>
+<p id="dailyStatus">במסלול הרגיל ניתן לנתח שיר אחד בכל שבוע.</p><p id="dailyCountdown" class="quota-countdown hidden" aria-live="polite"></p>
+<p id="premiumOffer" class="premium-offer">5 הראשונים יקבלו Premium ב־15 ₪ בלבד, חד־פעמי ולכל החיים. לאחר 5 הראשונים המחיר עולה ל־30 ₪.</p>
+<div class="plan-actions"><button id="upgradeBtn" class="primary" onclick="startPremiumCheckout()">שדרוג ל־Premium</button><button id="refreshPlanBtn" class="ghost" onclick="loadAccountState()">רענן מצב חשבון</button></div>
+<p id="paymentNote" style="color:#70879d"></p>
+</div>
+</div><div id="sideSectionAdmin" class="side-section hidden">
+<div class="side-section-title"><strong>🛠️ גישת מנהל</strong><button class="ghost" type="button" onclick="hideSideSections()">×</button></div>
+<section id="adminPanel" class="card admin-panel hidden">
+<div class="plan-head"><strong>ניהול מנהל</strong><span class="instrument-badge">גישה מנהלית</span></div>
+<div class="admin-grid">
+<div><div class="label">ניהול Premium</div><div class="admin-actions"><input id="adminEmail" type="email" placeholder="user@example.com"><button class="primary" type="button" onclick="adminSetPremium(true)">＋ הוסף Premium</button><button class="ghost" type="button" onclick="adminSetPremium(false)">− הסר Premium</button></div><div id="adminStatus" class="admin-status"></div><div class="label" style="margin-top:14px">משתמשי Premium ידניים</div><div id="adminPremiumUsers" class="admin-op-list"><div class="activity-empty">טוען…</div></div></div>
+<div><div class="plan-head"><strong>יומן ניתוחים מלא</strong><button class="ghost" type="button" onclick="loadAdminOperations()">רענן</button></div><div id="adminOperations" class="admin-op-list"><div class="activity-empty">טוען…</div></div><pre id="adminLog" class="admin-log">בחר פעולת ניתוח כדי לראות את כל האירועים.</pre><div id="adminSummary" class="admin-status"></div></div>
+</div>
+</section>
+</div></aside>
 </div>
 <div id="authModal" class="account-modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" onclick="if(event.target===this)closeAuth()"><div class="account-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="authTitle">כניסה לחשבון</h2><button class="ghost" style="flex:0 0 auto" onclick="closeAuth()">✕</button></div><p id="authIntro">התחבר באמצעות Google או אימייל וסיסמה</p><div class="auth-tabs"><button id="loginTab" class="secondary" onclick="setAuthMode('login')">כניסה</button><button id="registerTab" class="secondary" onclick="setAuthMode('register')">הרשמה</button></div><form id="authForm" onsubmit="submitAuth(event)"><div id="registerNameWrap" class="hidden"><label for="authName">שם מלא</label><input id="authName" autocomplete="name" maxlength="80" placeholder="איך קוראים לך?"></div><div id="registerInstrumentWrap" class="hidden auth-instrument"><label for="authInstrument">באיזה כלי אתה מנגן?</label><select id="authInstrument"><option value="guitar">🎸 גיטרה</option><option value="organ">🎹 אורגן</option></select></div><label for="authEmail">כתובת אימייל</label><input id="authEmail" type="email" autocomplete="email" required placeholder="name@example.com"><label for="authPassword">סיסמה</label><input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="לפחות 8 תווים"><div id="authError" class="auth-error"></div><button id="authSubmit" class="primary" type="submit" style="width:100%">כניסה</button></form><div style="text-align:center;margin:15px 0;color:#71879c;font-size:11px">או</div><button class="secondary" style="width:100%" onclick="location.href='/auth/google'">G&nbsp; המשך עם Google</button></div></div>
 <div id="mySongsModal" class="my-songs-modal hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closeMySongs()"><div class="my-songs-dialog"><div class="auth-actions" style="justify-content:space-between"><div><h2 style="margin:0">🎵 השירים שלי</h2><p style="margin:4px 0 0;color:#7f95aa;font-size:11px">כל השירים והניתוחים שנשמרו אוטומטית בחשבון</p></div><button class="ghost" type="button" onclick="closeMySongs()">✕</button></div><div id="mySongsList" class="saved-song-list"><div class="activity-empty">טוען את השירים…</div></div></div></div>
