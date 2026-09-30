@@ -562,11 +562,22 @@ app.post("/api/search-song",async function(req,res){
   if(!parsed||typeof parsed!=="object")throw new Error("Gemini לא החזיר תוצאת חיפוש תקינה");
   const gm=candidate.groundingMetadata||candidate.grounding_metadata||{};
   const chunks=Array.isArray(gm.groundingChunks)?gm.groundingChunks:Array.isArray(gm.grounding_chunks)?gm.grounding_chunks:[];
-  const groundedUrls=chunks.map(function(chunk){return normalizedHttpUrl(chunk&&chunk.web&&chunk.web.uri||"");}).filter(Boolean);
+  const groundedCandidates=chunks.map(function(chunk){
+    return {url:normalizedHttpUrl(chunk&&chunk.web&&chunk.web.uri||""),title:String(chunk&&chunk.web&&chunk.web.title||""),text:String(chunk&&chunk.web&&chunk.web.text||"")};
+  }).filter(function(item){return Boolean(item.url);});
+  const groundedUrls=groundedCandidates.map(function(item){return item.url;});
   const returnedUrl=normalizedHttpUrl(parsed.url||"");
   let exact=groundedUrls.find(function(u){return u===returnedUrl;});
   if(!exact&&returnedUrl)exact=groundedUrls.find(function(u){return u.replace(/\/$/,"")===returnedUrl.replace(/\/$/,"");})||"";
-  if(!exact)exact=groundedUrls.find(isYoutubeUrl)||groundedUrls[0]||"";
+  if(!exact){
+    const needle=(artist+" "+title).toLowerCase().replace(/[^a-z0-9א-ת]+/g," ").trim().split(/\s+/).filter(function(x){return x.length>=2;});
+    const matched=groundedCandidates.find(function(item){
+      const hay=(item.title+" "+item.text).toLowerCase();
+      return needle.length>0&&needle.every(function(word){return hay.indexOf(word)>=0;});
+    });
+    if(matched)exact=matched.url;
+  }
+  if(!exact)exact=groundedCandidates.find(function(item){return isYoutubeUrl(item.url);})?.url||"";
   if(!exact||parsed.found===false){
    return res.json({found:false,artist:String(parsed.artist||artist),title:String(parsed.title||title),url:"",sourceTitle:String(parsed.sourceTitle||""),note:String(parsed.note||"לא נמצא קישור מדויק ומאומת.")});
   }
