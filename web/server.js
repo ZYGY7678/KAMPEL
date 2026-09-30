@@ -937,7 +937,7 @@ app.post("/api/export/docx", async function(req, res) {
 
 
 const selfTests = new Map();
-const SELF_TEST_AUDIO_URL = "https://upload.wikimedia.org/wikipedia/commons/transcoded/6/6e/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg.mp3";
+const SELF_TEST_AUDIO_URL = "https://storage.googleapis.com/generativeai-downloads/data/Apollo-11_Day-01-Highlights-10s.mp3";
 
 function selfTestAuthorized(req) {
   return process.env.SELF_TEST_ENABLED === "true" &&
@@ -990,10 +990,10 @@ async function runSelfTest(id) {
     const audioResponse = await fetch(SELF_TEST_AUDIO_URL);
     if (!audioResponse.ok) throw new Error("הורדת אודיו לבדיקה נכשלה: HTTP " + audioResponse.status);
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-    const mimeType = String(audioResponse.headers.get("content-type") || "audio/mpeg").split(";")[0] || "audio/mpeg";
+    const mimeType = "audio/mp3";
     if (!audioBuffer.length) throw new Error("קובץ הבדיקה ריק");
     const audioBase64 = audioBuffer.toString("base64");
-    const filename = "amazing-grace.mp3";
+    const filename = "apollo-11-highlights.mp3";
     state.audioBytes = audioBuffer.length;
     state.mimeType = mimeType;
 
@@ -1002,7 +1002,7 @@ async function runSelfTest(id) {
     state.checks.transcription = { ok: Boolean(transcript && transcript.trim()), chars: String(transcript || "").length };
 
     setStage("chordino", "Sonic Annotator + Chordino");
-    const tempPath = path.join(uploadDir, "self-test-" + id + ".ogg");
+    const tempPath = path.join(uploadDir, "self-test-" + id + ".mp3");
     await fs.writeFile(tempPath, audioBuffer);
     try {
       const audioMetadata = await extractAudioMetadata(tempPath);
