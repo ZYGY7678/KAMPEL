@@ -606,8 +606,8 @@ function updatePlaybackHighlight(t,forceScroll){
    var model=(analysis.lines||[]).find(function(item){return String(item.id)===best.lineId}),words=model&&model.words||[],index=words.findIndex(function(w){return String(w.id||"")===best.wordId});
    if(index>=0)wordTarget=target.querySelectorAll(".word")[index]||null;
    var wordKey=best.lineId+":"+best.wordId,isNewWord=body._lastAutoWordId!==wordKey;
-   if((forceScroll||isNewWord||body._lastAutoLineId!==best.lineId)&&!isLyricsAutoScrollBlocked(body)){
-     (wordTarget||target).scrollIntoView({behavior:"auto",block:"center",inline:"nearest"});
+   if((forceScroll||body._lastAutoLineId!==best.lineId)&&!isLyricsAutoScrollBlocked(body)){
+     target.scrollIntoView({behavior:"smooth",block:"center",inline:"nearest"});
    }
    body._lastAutoLineId=best.lineId;body._lastAutoWordId=wordKey;
  }
