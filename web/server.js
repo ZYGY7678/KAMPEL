@@ -742,12 +742,15 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
       signal:controller.signal
     });
     const raw=await response.text();let data={};
-    try{data=raw?JSON.parse(raw):{};}catch{
-      const error=new Error("שירות Chordino החזיר תשובה שאינה JSON תקין");
-      error.chordinoStatus=response.status;throw error;
+    try{data=raw?JSON.parse(raw):{};}catch(parseError){
+      const contentType=String(response.headers.get("content-type")||"לא צוין");
+      const preview=String(raw||"").replace(/\\s+/g," ").slice(0,240);
+      const error=new Error("שירות Chordino החזיר גוף שאינו JSON; HTTP "+response.status+"; Content-Type: "+contentType+"; תשובה: "+(preview||"[ריק]"));
+      error.chordinoStatus=response.status;error.code="CHORDINO_INVALID_RESPONSE";throw error;
     }
     if(!response.ok){
-      const error=new Error(data&&data.detail||data&&data.error||"שירות Chordino נכשל");
+      const detail=data&&data.detail||data&&data.error||"שירות Chordino נכשל";
+      const error=new Error(String(detail)+" (HTTP "+response.status+")");
       error.chordinoStatus=response.status;throw error;
     }
     const chords=Array.isArray(data.chords)?data.chords.map(function(chord){
