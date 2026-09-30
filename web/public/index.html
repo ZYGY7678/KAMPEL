@@ -92,6 +92,33 @@ body.theme-day .drop-icon{background:#e8f1f6;color:#287089}body.theme-day .uploa
 .easy-version-info{color:#7fa0b5;font-size:10px;line-height:1.4}
 .line{scroll-margin-top:100px}
 @media(max-width:650px){.easy-version-tool{min-width:0}.easy-version-info{width:100%}}
+
+.my-songs-btn{position:relative}
+.my-songs-modal,.song-search-modal,.download-return-modal{position:fixed;inset:0;z-index:140;display:grid;place-items:center;padding:16px;background:rgba(3,12,22,.74);backdrop-filter:blur(10px)}
+.my-songs-dialog,.song-search-dialog,.download-return-dialog{width:min(760px,100%);max-height:min(88vh,820px);overflow:auto;padding:22px;border-radius:22px;background:#0b1d31;border:1px solid rgba(120,190,220,.2);box-shadow:0 28px 100px #0009}
+.saved-song-list{display:grid;gap:9px;margin-top:14px}
+.saved-song{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025)}
+.saved-song-main{min-width:0;flex:1;text-align:right}
+.saved-song-main strong{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.saved-song-main small{display:block;color:#7e95aa;font-size:10px;margin-top:3px}
+.saved-song-actions{display:flex;gap:7px;flex-wrap:wrap}
+.saved-song-actions button{padding:8px 10px;font-size:10px}
+.search-form{display:grid;gap:9px;margin-top:14px}
+.search-form label{font-size:10px;color:#72889e}
+.search-form input,.search-form textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:11px;background:#071522;color:#edf5ff;font:inherit}
+.search-form textarea{min-height:86px;resize:vertical}
+.search-actions{display:flex;gap:8px;flex-wrap:wrap}
+.search-result{margin-top:15px;padding:14px;border:1px solid rgba(103,216,210,.2);border-radius:14px;background:rgba(103,216,210,.04)}
+.search-result-title{font-weight:800;font-size:16px}.search-result-meta{color:#8aa0b4;font-size:11px;margin-top:4px}
+.search-result-url{direction:ltr;text-align:left;word-break:break-all;color:#80d9ca;font:11px ui-monospace,monospace;margin:10px 0}
+.search-result-actions{display:flex;gap:8px;flex-wrap:wrap}
+.search-result-actions button,.search-result-actions a{padding:9px 11px;border-radius:10px;text-decoration:none;text-align:center}
+.search-status{min-height:22px;color:#8fa8bb;font-size:11px;line-height:1.5}
+.download-return-card{max-width:720px;margin:12px auto 0;padding:14px;border-radius:15px;border:1px solid rgba(103,216,210,.25);background:rgba(103,216,210,.05);display:flex;align-items:center;justify-content:space-between;gap:12px}
+.download-return-card strong{display:block}.download-return-card small{color:#84a0b3;font-size:10px}
+body.theme-day .my-songs-dialog,body.theme-day .song-search-dialog,body.theme-day .download-return-dialog{background:#fff}
+body.theme-day .search-form input,body.theme-day .search-form textarea{background:#fff;color:#172333}
+@media(max-width:650px){.saved-song{align-items:flex-start;flex-direction:column}.saved-song-actions{width:100%}.saved-song-actions button{flex:1}.download-return-card{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
 <body>
@@ -102,6 +129,9 @@ body.theme-day .drop-icon{background:#e8f1f6;color:#287089}body.theme-day .uploa
 <div class="top-right"><span class="pill"><i></i>Gemini 3.8 Flash</span><button id="account" type="button" class="pill account-pill" title="חשבון" onclick='openAccount()'>לא מחובר</button><button id="loginBtn" type="button" class="primary" onclick='openAuth("login")'>כניסה</button><button id="registerBtn" type="button" class="secondary" onclick='openAuth("register")'>הרשמה</button><button id="logoutBtn" type="button" class="ghost hidden" onclick='logoutGoogle()'>יציאה</button><button id="themeBtn" type="button" class="ghost settings-trigger" onclick="openThemeSettings()" title="מצב יום/לילה וצבעים">⚙</button><button id="newBtn" class="ghost hidden" onclick="goHome()">שיר חדש</button></div>
 </header>
 <div id="authModal" class="account-modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" onclick="if(event.target===this)closeAuth()"><div class="account-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="authTitle">כניסה לחשבון</h2><button class="ghost" style="flex:0 0 auto" onclick="closeAuth()">✕</button></div><p id="authIntro">התחבר באמצעות Google או אימייל וסיסמה</p><div class="auth-tabs"><button id="loginTab" class="secondary" onclick="setAuthMode('login')">כניסה</button><button id="registerTab" class="secondary" onclick="setAuthMode('register')">הרשמה</button></div><form id="authForm" onsubmit="submitAuth(event)"><div id="registerNameWrap" class="hidden"><label for="authName">שם מלא</label><input id="authName" autocomplete="name" maxlength="80" placeholder="איך קוראים לך?"></div><div id="registerInstrumentWrap" class="hidden auth-instrument"><label for="authInstrument">באיזה כלי אתה מנגן?</label><select id="authInstrument"><option value="guitar">🎸 גיטרה</option><option value="organ">🎹 אורגן</option></select></div><label for="authEmail">כתובת אימייל</label><input id="authEmail" type="email" autocomplete="email" required placeholder="name@example.com"><label for="authPassword">סיסמה</label><input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="לפחות 8 תווים"><div id="authError" class="auth-error"></div><button id="authSubmit" class="primary" type="submit" style="width:100%">כניסה</button></form><div style="text-align:center;margin:15px 0;color:#71879c;font-size:11px">או</div><button class="secondary" style="width:100%" onclick="location.href='/auth/google'">G&nbsp; המשך עם Google</button></div></div>
+<div id="mySongsModal" class="my-songs-modal hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closeMySongs()"><div class="my-songs-dialog"><div class="auth-actions" style="justify-content:space-between"><div><h2 style="margin:0">🎵 השירים שלי</h2><p style="margin:4px 0 0;color:#7f95aa;font-size:11px">כל השירים והניתוחים שנשמרו אוטומטית בחשבון</p></div><button class="ghost" type="button" onclick="closeMySongs()">✕</button></div><div id="mySongsList" class="saved-song-list"><div class="activity-empty">טוען את השירים…</div></div></div></div>
+<div id="songSearchModal" class="song-search-modal hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closeSongSearch()"><div class="song-search-dialog"><div class="auth-actions" style="justify-content:space-between"><div><h2 style="margin:0">🔎 חפש שיר בגוגל</h2><p style="margin:4px 0 0;color:#7f95aa;font-size:11px">החיפוש מבוצע באמצעות Gemini Flash Lite עם חיפוש Google</p></div><button class="ghost" type="button" onclick="closeSongSearch()">✕</button></div><div class="search-form"><label for="songSearchArtist">שם מלא של הזמר</label><input id="songSearchArtist" placeholder="לדוגמה: עידן רייכל"><label for="songSearchTitle">שם מלא של השיר</label><input id="songSearchTitle" placeholder="לדוגמה: ממעמקים"><label for="songSearchDetails">פרטים נוספים (אופציונלי)</label><textarea id="songSearchDetails" placeholder="שנת יציאה, אלבום, גרסה, שפה או כל פרט שיעזור למצוא את ההקלטה המדויקת"></textarea><div class="search-actions"><button id="songSearchBtn" class="primary" type="button" onclick="searchSong()">🔎 חפש את השיר</button><button class="ghost" type="button" onclick="closeSongSearch()">ביטול</button></div><div id="songSearchStatus" class="search-status"></div></div><div id="songSearchResult"></div></div></div>
+<div id="downloadReturnModal" class="download-return-modal hidden" role="dialog" aria-modal="true"><div class="download-return-dialog"><h2 style="margin:0 0 7px">📥 אנא הוסף את השיר מההורדות</h2><p style="color:#8da1b8;font-size:12px;line-height:1.6">החיפוש הסתיים. עכשיו חזור לקבצים שהורדת במכשיר ובחר את קובץ השיר כדי להעלות אותו ל־Chord Studio.</p><button class="primary" type="button" style="width:100%" onclick="closeDownloadReturnPrompt();setStage('home');fileInput.click()">📂 פתח את ההורדות ובחר את השיר</button><button class="ghost" type="button" style="width:100%;margin-top:8px" onclick="closeDownloadReturnPrompt()">אעשה זאת אחר כך</button></div></div>
 <div id="apiOnboardingModal" class="account-modal hidden" role="dialog" aria-modal="true">
   <div class="card api-onboarding">
     <div class="auth-actions" style="justify-content:space-between">
@@ -158,7 +188,8 @@ body.theme-day .drop-icon{background:#e8f1f6;color:#287089}body.theme-day .uploa
 <div class="drop-icon">♫</div><h3>גרור לכאן את השיר</h3><p>או לחץ כדי לבחור קובץ מהמכשיר</p>
 <div class="formats"><span>MP3</span><span>WAV</span><span>M4A</span><span>FLAC</span><span>OGG</span></div>
 </div>
-<div class="actions"><button id="chooseBtn" class="primary" disabled onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary" onclick="loadDemo()">צפה בדוגמה חיה</button></div>
+<div id="downloadReturnCard" class="download-return-card hidden"><div><strong>חזרת מאתר הורדת השיר</strong><small>אנא הוסף עכשיו את השיר מההורדות כדי להתחיל את הניתוח</small></div><button class="primary" type="button" onclick="fileInput.click()">📥 הוסף את השיר מההורדות</button></div>
+<div class="actions"><button id="chooseBtn" class="primary" disabled onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary my-songs-btn" type="button" onclick="openMySongs()">🎵 השירים שלי</button><button class="secondary" type="button" onclick="openSongSearch()">🔎 חפש שיר בגוגל</button></div>
 <div class="features"><div><b>01</b><span>זיהוי מילים</span></div><div><b>02</b><span>זיהוי אקורדים</span></div><div><b>03</b><span>מיקום לפי זמן</span></div><div><b>04</b><span>PDF להורדה</span></div></div>
 </div>
 <div id="homeError" class="error hidden"></div>
