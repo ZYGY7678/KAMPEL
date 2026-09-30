@@ -1194,7 +1194,7 @@ function noBorders() {
 }
 
 function makeWordTable(words, fontSize) {
-  const bodySize = Math.max(10, Math.min(48, Number(fontSize) || 24));
+  const bodySize = Math.max(4, Math.min(48, Number(fontSize) || 14));
   const chordSize = Math.max(9, bodySize - 5);
   const chordCells = words.map(function(w) {
     return new TableCell({
@@ -1307,7 +1307,7 @@ app.post("/api/export/docx", async function(req, res) {
     const analysis = payload.analysis;
     const shift = Math.max(-12, Math.min(12, Number(payload.shift) || 0));
     const mode = payload.simplify || "off";
-    const fontSize = Math.max(12, Math.min(36, Number(payload.fontSize) || 24));
+    const fontSize = Math.max(4, Math.min(36, Number(payload.fontSize) || 14));
     if (!analysis) return res.status(400).json({ error: "חסר נתון ניתוח" });
 
     const key = analysis.key ? transposeChord(analysis.key, shift) : "—";
