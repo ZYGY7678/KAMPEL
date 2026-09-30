@@ -36,6 +36,7 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "20mb" }));
 
 const operations = new Map();
+const operationOwners = new Map();
 const pendingVerifications = new Map();
 function operationId(req) { return String(req.headers["x-operation-id"] || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80); }
 function logOperation(id, stage, message, level) {
@@ -858,9 +859,12 @@ app.get("/api/admin/summary",async function(req,res){
 });
 app.get("/api/operations/:id",async function(req,res){
  const session=await authSession(req);
- if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});
+ if(!session)return res.status(401).json({error:"יש להתחבר כדי לקרוא את מצב הניתוח"});
  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
- res.setHeader("Cache-Control","no-store");res.json({operationId:id,events:operations.get(id)||[]});
+ const accountId=accountIdForUser(session.user);
+ if(normalizeEmail(session.user.email)!==ADMIN_EMAIL&&operationOwners.get(id)!==accountId)return res.status(403).json({error:"אין הרשאה לקרוא את מצב הניתוח הזה"});
+ res.setHeader("Cache-Control","no-store");
+ res.json({operationId:id,events:operations.get(id)||[]});
 });
 app.post("/api/analyze",async function(req,res){
  const startedAt=Date.now();req.operationId=operationId(req);
@@ -869,6 +873,7 @@ app.post("/api/analyze",async function(req,res){
  try{
   const access=await requireUploadAccess(req,res,{consumeDaily:true,validateGeminiKey:true});
   if(access!==true){logOperation(req.operationId,"access_denied","השרת עצר את הבקשה בשלב בדיקת הרשאות; HTTP "+res.statusCode,"error");return;}
+  operationOwners.set(req.operationId,accountIdForUser(req.auth.session.user));
   currentStage="upload";
   logOperation(req.operationId,"upload_receiving","השרת התחיל לקבל את קובץ האודיו");
   upload.single("audio")(req,res,async function(uploadError){
