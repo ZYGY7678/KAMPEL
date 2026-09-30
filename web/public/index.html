@@ -158,7 +158,10 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
   </div>
 </div>
 <div id="themeModal" class="theme-modal hidden" role="dialog" aria-modal="true"><div class="settings-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="themeTitle">מראה האתר</h2><button class="ghost" type="button" onclick="closeThemeSettings()">✕</button></div><p>בחר מצב יום או לילה וצבע דגש.</p><div class="settings-grid"><button id="themeNightOption" class="setting-option" type="button" onclick="setTheme('night')">🌙 מצב לילה<br><small>תצוגה כהה</small></button><button id="themeDayOption" class="setting-option" type="button" onclick="setTheme('day')">☀️ מצב יום<br><small>תצוגה בהירה</small></button></div><div style="margin:18px 0 8px;font-weight:700">צבע הדגש</div><div class="swatches"><button class="swatch" data-accent="cyan" aria-label="טורקיז" onclick="setAccent('cyan')"></button><button class="swatch" data-accent="purple" aria-label="סגול" onclick="setAccent('purple')"></button><button class="swatch" data-accent="rose" aria-label="ורוד כתום" onclick="setAccent('rose')"></button><button class="swatch" data-accent="green" aria-label="ירוק" onclick="setAccent('green')"></button><button class="swatch" data-accent="gold" aria-label="זהב" onclick="setAccent('gold')"></button><button class="swatch" data-accent="blue" aria-label="כחול" onclick="setAccent('blue')"></button></div></div></div>
-<div id="chordActionModal" class="chord-action-modal hidden" role="dialog" aria-modal="true"><div class="chord-action-dialog"><div class="chord-action-title"><h2>פעולה על האקורד</h2><button class="ghost" type="button" onclick="closeChordActions()">✕</button></div><div id="chordActionChord" class="c<section id="home" class="main">\n<div class="home-layout">\n<div class="home-main">\n<div class="hero">
+<div id="chordActionModal" class="chord-action-modal hidden" role="dialog" aria-modal="true"><div class="chord-action-dialog"><div class="chord-action-title"><h2>פעולה על האקורד</h2><button class="ghost" type="button" onclick="closeChordActions()">✕</button></div><div id="chordActionChord" class="c<section id="home" class="main">
+<div class="home-layout">
+<div class="home-main">
+<div class="hero">
 <div class="eyebrow">✦ אקורדים ומילים מתוך האודיו שלך</div>
 <h1>העלה שיר.<br><span>קבל דף נגינה.</span></h1>
 <p>מילים, אקורדים, תזמון, שינוי טון ופישוט — מסודרים יחד בצורה נקייה ומוכנה לנגינה.</p>
@@ -172,7 +175,9 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 <div class="features"><div><b>01</b><span>זיהוי מילים</span></div><div><b>02</b><span>זיהוי אקורדים</span></div><div><b>03</b><span>מיקום לפי זמן</span></div><div><b>04</b><span>PDF להורדה</span></div></div>
 </div>
 <div id="homeError" class="error hidden"></div>
-</section>\n</div>\n<aside class="home-sidebar">\n<div class="card home-access-card" style="padding:16px;border-radius:16px;text-align:right" data-old-style="replaced";margin:0 auto 22px;padding:16px;border-radius:16px;text-align:right">
+</div>
+<aside class="home-sidebar">
+<div class="card home-access-card" style="padding:16px;border-radius:16px;text-align:right">
 <div style="font-weight:700;margin-bottom:10px">גישה ל־Chord Studio</div>
 <div id="accountAccessStatus" style="color:#8da1b8;font-size:12px;line-height:1.6">1. היכנס או הירשם · 2. הזן מפתח Gemini API</div>
 <div id="apiAccessPanel" style="margin-top:12px">
@@ -188,23 +193,17 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 <div class="plan-actions"><button id="upgradeBtn" class="primary" onclick="startPremiumCheckout()">שדרוג ל־Premium</button><button id="refreshPlanBtn" class="ghost" onclick="loadAccountState()">רענן מצב חשבון</button></div>
 <p id="paymentNote" style="color:#70879d"></p>
 </div>
-
 <div id="uploadGateMessage" class="gate-note">יש להתחבר עם Google ולהזין מפתח Gemini API כדי להעלות קובץ</div>
 </div>
 <section id="adminPanel" class="card admin-panel hidden">
-  <div class="plan-head"><strong>ניהול מנהל</strong><span class="instrument-badge">גישה מנהלית</span></div>
-  <div class="admin-grid">
-    <div><div class="label">ניהול Premium</div><div class="admin-actions"><input id="adminEmail" type="email" placeholder="user@example.com"><button class="primary" type="button" onclick="adminSetPremium(true)">＋ הוסף Premium</button><button class="ghost" type="button" onclick="adminSetPremium(false)">− הסר Premium</button></div><div id="adminStatus" class="admin-status"></div><div class="label" style="margin-top:14px">משתמשי Premium ידניים</div><div id="adminPremiumUsers" class="admin-op-list"><div class="activity-empty">טוען…</div></div></div>
-    <div><div class="plan-head"><strong>יומן ניתוחים מלא</strong><button class="ghost" type="button" onclick="loadAdminOperations()">רענן</button></div><div id="adminOperations" class="admin-op-list"><div class="activity-empty">טוען…</div></div><pre id="adminLog" class="admin-log">בחר פעולת ניתוח כדי לראות את כל האירועים.</pre><div id="adminSummary" class="admin-status"></div></div>
-  </div>
+<div class="plan-head"><strong>ניהול מנהל</strong><span class="instrument-badge">גישה מנהלית</span></div>
+<div class="admin-grid">
+<div><div class="label">ניהול Premium</div><div class="admin-actions"><input id="adminEmail" type="email" placeholder="user@example.com"><button class="primary" type="button" onclick="adminSetPremium(true)">＋ הוסף Premium</button><button class="ghost" type="button" onclick="adminSetPremium(false)">− הסר Premium</button></div><div id="adminStatus" class="admin-status"></div><div class="label" style="margin-top:14px">משתמשי Premium ידניים</div><div id="adminPremiumUsers" class="admin-op-list"><div class="activity-empty">טוען…</div></div></div>
+<div><div class="plan-head"><strong>יומן ניתוחים מלא</strong><button class="ghost" type="button" onclick="loadAdminOperations()">רענן</button></div><div id="adminOperations" class="admin-op-list"><div class="activity-empty">טוען…</div></div><pre id="adminLog" class="admin-log">בחר פעולת ניתוח כדי לראות את כל האירועים.</pre><div id="adminSummary" class="admin-status"></div></div>
+</div>
 </section>
-\n</aside>\n</div>\n</section>\n
+</aside>
 </div>
-<div id="downloadReturnCard" class="download-return-card hidden"><div><strong>חזרת מאתר הורדת השיר</strong><small>אנא הוסף עכשיו את השיר מההורדות כדי להתחיל את הניתוח</small></div><button class="primary" type="button" onclick="fileInput.click()">📥 הוסף את השיר מההורדות</button></div>
-<div class="actions"><button id="chooseBtn" class="primary" disabled onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary my-songs-btn" type="button" onclick="openMySongs()">🎵 השירים שלי</button><button class="secondary" type="button" onclick="openSongSearch()">🔎 חפש שיר בגוגל</button></div>
-<div class="features"><div><b>01</b><span>זיהוי מילים</span></div><div><b>02</b><span>זיהוי אקורדים</span></div><div><b>03</b><span>מיקום לפי זמן</span></div><div><b>04</b><span>PDF להורדה</span></div></div>
-</div>
-<div id="homeError" class="error hidden"></div>
 </section>
 
 <section id="ready" class="center hidden">
