@@ -90,7 +90,7 @@ body.theme-day .drop-icon{background:#e8f1f6;color:#287089}body.theme-day .uploa
 .easy-version-btn:hover{border-color:var(--ui-accent)}
 .easy-version-btn:disabled{opacity:.65;cursor:default}
 .easy-version-info{color:#7fa0b5;font-size:10px;line-height:1.4}
-.line{scroll-margin-top:100px}
+.line{scroll-margin-top:100px}.home-layout{width:min(1240px,100%);margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px;align-items:start}.home-main{min-width:0}.home-sidebar{position:sticky;top:94px;display:flex;flex-direction:column;gap:11px;min-width:0}.home-sidebar .home-access-card{margin:0!important;max-width:none!important}.home-sidebar .plan-panel{margin-top:12px}.home-sidebar .admin-panel{display:block;margin:0!important;max-width:none!important;padding:16px}.home-sidebar .admin-grid{grid-template-columns:1fr;gap:12px}.home-sidebar .admin-actions{display:grid;grid-template-columns:1fr 1fr}.home-sidebar .admin-actions input{grid-column:1/-1;min-width:0}.home-sidebar .admin-log{min-height:120px;max-height:220px}.home-sidebar .admin-op-list{max-height:170px}@media(max-width:900px){.home-layout{grid-template-columns:1fr}.home-sidebar{position:static;order:2}.home-main{order:1}}
 .side-media{overflow:hidden}.side-media-actions{display:flex;gap:7px;align-items:center;margin-top:10px}.side-media-actions button{flex:1}.side-image-input{display:none}.side-image-drop{margin-top:10px;min-height:74px;padding:12px;border:1px dashed rgba(112,187,229,.28);border-radius:12px;background:rgba(255,255,255,.02);display:grid;place-items:center;text-align:center;color:#7690a5;font-size:10px;line-height:1.5;cursor:pointer;transition:.2s}.side-image-drop.hot{border-color:rgba(103,216,210,.65);background:rgba(103,216,210,.06);color:#b8efe8}.side-image-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;max-height:340px;overflow:auto;padding-right:2px}.side-image-item{position:relative;min-width:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#071522}.side-image-item img{display:block;width:100%;height:105px;object-fit:cover}.side-image-item button{position:absolute;top:5px;right:5px;width:24px;height:24px;border:0;border-radius:50%;background:rgba(4,13,23,.82);color:#fff;font-size:13px;line-height:1}.side-image-item small{display:block;padding:5px 6px;color:#7890a5;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.side-image-empty{color:#5f768b;font-size:9px;line-height:1.5;padding:5px 2px}.side-media-note{display:block;margin-top:7px;color:#60788e;font-size:8px;line-height:1.5}
 @media(max-width:650px){.easy-version-tool{min-width:0}.easy-version-info{width:100%}}
 
@@ -158,10 +158,21 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
   </div>
 </div>
 <div id="themeModal" class="theme-modal hidden" role="dialog" aria-modal="true"><div class="settings-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="themeTitle">מראה האתר</h2><button class="ghost" type="button" onclick="closeThemeSettings()">✕</button></div><p>בחר מצב יום או לילה וצבע דגש.</p><div class="settings-grid"><button id="themeNightOption" class="setting-option" type="button" onclick="setTheme('night')">🌙 מצב לילה<br><small>תצוגה כהה</small></button><button id="themeDayOption" class="setting-option" type="button" onclick="setTheme('day')">☀️ מצב יום<br><small>תצוגה בהירה</small></button></div><div style="margin:18px 0 8px;font-weight:700">צבע הדגש</div><div class="swatches"><button class="swatch" data-accent="cyan" aria-label="טורקיז" onclick="setAccent('cyan')"></button><button class="swatch" data-accent="purple" aria-label="סגול" onclick="setAccent('purple')"></button><button class="swatch" data-accent="rose" aria-label="ורוד כתום" onclick="setAccent('rose')"></button><button class="swatch" data-accent="green" aria-label="ירוק" onclick="setAccent('green')"></button><button class="swatch" data-accent="gold" aria-label="זהב" onclick="setAccent('gold')"></button><button class="swatch" data-accent="blue" aria-label="כחול" onclick="setAccent('blue')"></button></div></div></div>
-<div id="chordActionModal" class="chord-action-modal hidden" role="dialog" aria-modal="true"><div class="chord-action-dialog"><div class="chord-action-title"><h2>פעולה על האקורד</h2><button class="ghost" type="button" onclick="closeChordActions()">✕</button></div><div id="chordActionChord" class="chord-action-chord">—</div><div class="chord-action-buttons"><button id="editChordAction" type="button">✎ ערוך אקורד</button><button id="showChordAction" type="button">🎸 הצג איך לנגן</button></div></div></div>
-<div id="diagramModal" class="diagram-modal hidden" role="dialog" aria-modal="true"><div class="diagram-dialog"><div class="diagram-head"><div><h2 id="diagramTitle" style="margin:0">מילון אקורדים</h2><span id="diagramInstrumentBadge" class="instrument-badge">🎸 גיטרה</span></div><button class="ghost" type="button" onclick="closeDiagram()">✕</button></div><div class="diagram-tools"><button id="diagramGuitarBtn" type="button" onclick="setInstrument('guitar');renderChordDiagram('guitar')">🎸 גיטרה</button><button id="diagramOrganBtn" type="button" onclick="setInstrument('organ');renderChordDiagram('organ')">🎹 אורגן</button></div><div id="diagramContent"></div></div></div>
-<section id="home" class="main">
-<div class="card" style="max-width:720px;margin:0 auto 22px;padding:16px;border-radius:16px;text-align:right">
+<div id="chordActionModal" class="chord-action-modal hidden" role="dialog" aria-modal="true"><div class="chord-action-dialog"><div class="chord-action-title"><h2>פעולה על האקורד</h2><button class="ghost" type="button" onclick="closeChordActions()">✕</button></div><div id="chordActionChord" class="c<section id="home" class="main">\n<div class="home-layout">\n<div class="home-main">\n<div class="hero">
+<div class="eyebrow">✦ אקורדים ומילים מתוך האודיו שלך</div>
+<h1>העלה שיר.<br><span>קבל דף נגינה.</span></h1>
+<p>מילים, אקורדים, תזמון, שינוי טון ופישוט — מסודרים יחד בצורה נקייה ומוכנה לנגינה.</p>
+<div id="drop" class="drop">
+<input id="fileInput" type="file" accept="audio/*" hidden>
+<div class="drop-icon">♫</div><h3>גרור לכאן את השיר</h3><p>או לחץ כדי לבחור קובץ מהמכשיר</p>
+<div class="formats"><span>MP3</span><span>WAV</span><span>M4A</span><span>FLAC</span><span>OGG</span></div>
+</div>
+<div id="downloadReturnCard" class="download-return-card hidden"><div><strong>חזרת מאתר הורדת השיר</strong><small>אנא הוסף עכשיו את השיר מההורדות כדי להתחיל את הניתוח</small></div><button class="primary" type="button" onclick="fileInput.click()">📥 הוסף את השיר מההורדות</button></div>
+<div class="actions"><button id="chooseBtn" class="primary" disabled onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary my-songs-btn" type="button" onclick="openMySongs()">🎵 השירים שלי</button><button class="secondary" type="button" onclick="openSongSearch()">🔎 חפש שיר בגוגל</button></div>
+<div class="features"><div><b>01</b><span>זיהוי מילים</span></div><div><b>02</b><span>זיהוי אקורדים</span></div><div><b>03</b><span>מיקום לפי זמן</span></div><div><b>04</b><span>PDF להורדה</span></div></div>
+</div>
+<div id="homeError" class="error hidden"></div>
+</section>\n</div>\n<aside class="home-sidebar">\n<div class="card home-access-card" style="padding:16px;border-radius:16px;text-align:right" data-old-style="replaced";margin:0 auto 22px;padding:16px;border-radius:16px;text-align:right">
 <div style="font-weight:700;margin-bottom:10px">גישה ל־Chord Studio</div>
 <div id="accountAccessStatus" style="color:#8da1b8;font-size:12px;line-height:1.6">1. היכנס או הירשם · 2. הזן מפתח Gemini API</div>
 <div id="apiAccessPanel" style="margin-top:12px">
@@ -187,14 +198,7 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
     <div><div class="plan-head"><strong>יומן ניתוחים מלא</strong><button class="ghost" type="button" onclick="loadAdminOperations()">רענן</button></div><div id="adminOperations" class="admin-op-list"><div class="activity-empty">טוען…</div></div><pre id="adminLog" class="admin-log">בחר פעולת ניתוח כדי לראות את כל האירועים.</pre><div id="adminSummary" class="admin-status"></div></div>
   </div>
 </section>
-<div class="hero">
-<div class="eyebrow">✦ אקורדים ומילים מתוך האודיו שלך</div>
-<h1>העלה שיר.<br><span>קבל דף נגינה.</span></h1>
-<p>מילים, אקורדים, תזמון, שינוי טון ופישוט — מסודרים יחד בצורה נקייה ומוכנה לנגינה.</p>
-<div id="drop" class="drop">
-<input id="fileInput" type="file" accept="audio/*" hidden>
-<div class="drop-icon">♫</div><h3>גרור לכאן את השיר</h3><p>או לחץ כדי לבחור קובץ מהמכשיר</p>
-<div class="formats"><span>MP3</span><span>WAV</span><span>M4A</span><span>FLAC</span><span>OGG</span></div>
+\n</aside>\n</div>\n</section>\n
 </div>
 <div id="downloadReturnCard" class="download-return-card hidden"><div><strong>חזרת מאתר הורדת השיר</strong><small>אנא הוסף עכשיו את השיר מההורדות כדי להתחיל את הניתוח</small></div><button class="primary" type="button" onclick="fileInput.click()">📥 הוסף את השיר מההורדות</button></div>
 <div class="actions"><button id="chooseBtn" class="primary" disabled onclick="fileInput.click()">＋ בחר שיר לניתוח</button><button class="secondary my-songs-btn" type="button" onclick="openMySongs()">🎵 השירים שלי</button><button class="secondary" type="button" onclick="openSongSearch()">🔎 חפש שיר בגוגל</button></div>
@@ -493,7 +497,7 @@ var DEMO = {
 function show(id){document.getElementById(id).classList.remove("hidden")}
 function hide(id){document.getElementById(id).classList.add("hidden")}
 function setError(id,msg){var el=document.getElementById(id);if(msg){el.textContent=msg;show(id)}else hide(id)}
-function goHome(){stopAnalysisMessages();selectedFile=null;analysis=null;currentOperationId="";currentHistoryId="";shift=0;simplifyMode="off";if(audioUrl&&/^blob:/i.test(audioUrl)){URL.revokeObjectURL(audioUrl);}audioUrl="";separatedVocalsUrl="";playbackMode="original";separationBusy=false;audio.pause();audio.removeAttribute("src");hide("ready");hide("processing");hide("editor");show("home");hide("newBtn");setError("homeError","")}
+function goHome(){stopAnalysisMessages();selectedFile=null;analysis=null;currentOperationId="";currentHistoryId="";shift=0;simplifyMode="simple";if(audioUrl&&/^blob:/i.test(audioUrl)){URL.revokeObjectURL(audioUrl);}audioUrl="";separatedVocalsUrl="";playbackMode="original";separationBusy=false;audio.pause();audio.removeAttribute("src");hide("ready");hide("processing");hide("editor");show("home");hide("newBtn");setError("homeError","")}
 function setStage(name){["home","ready","processing","editor"].forEach(function(id){hide(id)});show(name);if(name==="processing")startAnalysisMessages();else stopAnalysisMessages();if(name!=="home")show("newBtn");else hide("newBtn")}
 function pickFile(file){if(analysisInFlight)return;if(!canUploadNewSong()){setError("homeError",uploadGateReason());updateUploadGate();return;}if(!file)return;clearDownloadReturnState();selectedFile=file;separatedVocalsUrl="";playbackMode="original";separationBusy=false;setError("homeError","");setError("readyError","");audioUrl=URL.createObjectURL(file);document.getElementById("fileName").textContent=file.name;document.getElementById("fileInfo").textContent=(file.size/1048576).toFixed(1)+" MB · מתחיל העלאה וניתוח אוטומטי…";setStage("processing");setUploadProgress(0,"הקובץ נבחר — מתחילים להעלות ולבדוק את השיר…");analyze()}
 document.getElementById("fileInput").addEventListener("change",function(e){pickFile(e.target.files[0])});
