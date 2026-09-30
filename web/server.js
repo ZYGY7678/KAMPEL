@@ -583,9 +583,31 @@ app.post("/api/verify/:id",async function(req,res){
  }catch(error){res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});}
 });
 
-app.get("/api/operations/:id",async function(req,res){
+app.get("/api/admin/operations",async function(req,res){
+ const session=await authSession(req);
+ if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});
+ const items=Array.from(operations.entries()).map(function(entry){const id=entry[0],events=entry[1]||[],last=events[events.length-1]||{};return{id:id,status:last.level==="error"?"נכשלה":last.stage==="completed"||last.stage==="response"?"הושלם":"בתהליך",updatedAt:last.time||null,eventCount:events.length}}).sort(function(a,b){return String(b.updatedAt||"").localeCompare(String(a.updatedAt||""))}).slice(0,50);
+ res.setHeader("Cache-Control","no-store");res.json({operations:items});
+});
+app.get("/api/admin/operations/:id",async function(req,res){
+ const session=await authSession(req);
+ if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});
  const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
- if(!await authSession(req))return res.status(401).json({error:"לא מחובר"});
+ res.setHeader("Cache-Control","no-store");res.json({operationId:id,events:operations.get(id)||[]});
+});
+app.get("/api/admin/summary",async function(req,res){
+ const session=await authSession(req);
+ if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});
+ let premiumUsers=0;
+ try{premiumUsers=Object.keys(await loadPremiumGrants()).length;}catch{}
+ let accountCount=null;
+ if(supabaseReady()){try{const rows=await sb("app_accounts?select=account_id");accountCount=Array.isArray(rows)?rows.length:null;}catch{}}
+ res.setHeader("Cache-Control","no-store");res.json({operationCount:operations.size,premiumUsers:premiumUsers,accountCount:accountCount,model:MODEL,transcriptionModel:TRANSCRIBE_MODEL,supabaseConfigured:supabaseReady(),stripeConfigured:Boolean(process.env.STRIPE_SECRET_KEY),chordinoConfigured:Boolean(LOCAL_AUDIO_ENGINE_URL&&LOCAL_AUDIO_ENGINE_TOKEN)});
+});
+app.get("/api/operations/:id",async function(req,res){
+ const session=await authSession(req);
+ if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});
+ const id=String(req.params.id||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
  res.setHeader("Cache-Control","no-store");res.json({operationId:id,events:operations.get(id)||[]});
 });
 app.post("/api/analyze",async function(req,res){
@@ -719,22 +741,27 @@ function transposeChord(chord, shift) {
 }
 
 function simplifyChord(chord, mode) {
-  const raw = String(chord || "");
-  if (!raw || mode === "off" || mode === "advanced") return raw;
+  const raw = String(chord || "").trim();
+  if (!raw || mode === "off") return raw;
   const slashIndex = raw.indexOf("/");
   const main = slashIndex > 0 ? raw.slice(0, slashIndex) : raw;
-  const bass = slashIndex > 0 ? raw.slice(slashIndex + 1) : "";
   const m = main.match(/^([A-G](?:#|b)?)(.*)$/);
   if (!m) return raw;
-  let suffix = m[2];
-  if (mode === "simple") {
-    suffix = /^m/i.test(suffix) ? "m" : "";
-    return m[1] + suffix;
+  const root = m[1], suffix = m[2] || "", lower = suffix.toLowerCase();
+  if (mode === "simple") return root + (/^(?:m|min)/.test(lower) ? "m" : "");
+  if (mode === "medium") {
+    if (/^(?:m|min)(?:7|9|11|13)?$/.test(lower)) return root + "m";
+    if (/^(?:dim|°)(?:7)?$/.test(lower)) return root + "dim";
+    if (/^(?:aug|\+)$/.test(lower)) return root + "aug";
+    if (/^sus[24]$/.test(lower)) return root + lower;
+    return root + (lower === "7" ? "7" : "");
   }
-  if (/^(maj7|maj9|maj11|maj13|M7|M9|M11|M13|7|9|11|13|add9|add11)$/i.test(suffix)) suffix = "";
-  if (/^m(?:7|9|11|13)$/i.test(suffix) || /^min(?:7|9|11|13)?$/i.test(suffix)) suffix = "m";
-  if (/^(dim7?|°7?|aug|\\+)$/i.test(suffix)) suffix = "";
-  return m[1] + suffix + (bass ? "/" + bass : "");
+  if (mode === "advanced") {
+    let simplified = suffix.replace(/(?:add)?(?:9|11|13)$/i, "");
+    if (/^min$/i.test(simplified)) simplified = "m";
+    return root + simplified;
+  }
+  return raw;
 }
 
 function transformChord(chord, shift, mode) {
