@@ -159,6 +159,43 @@ async function releaseDailyUsage(id,key){
  }
  usageReservations.delete(key);
 }
+async function storageRequest(pathname,method,body,contentType){
+ if(!supabaseReady())throw new Error("Supabase Storage is not configured");
+ const base=process.env.SUPABASE_URL.replace(/\/+$/,"");
+ const headers={apikey:process.env.SUPABASE_SERVICE_ROLE_KEY,Authorization:"Bearer "+process.env.SUPABASE_SERVICE_ROLE_KEY};
+ if(contentType)headers["Content-Type"]=contentType;
+ const response=await fetch(base+"/storage/v1/"+pathname,{method:method||"GET",headers:headers,body:body});
+ const raw=await response.text();
+ let data=null;try{data=raw?JSON.parse(raw):null;}catch{}
+ if(!response.ok){const message=data&&data.message||data&&data.error||data&&data.statusCode||("Storage HTTP "+response.status);const e=new Error(String(message));e.storageStatus=response.status;throw e;}
+ return data;
+}
+function storagePathSegments(p){return String(p||"").split("/").filter(Boolean).map(encodeURIComponent).join("/");}
+async function uploadSongToStorage(accountId,filePath,originalName,mimeType){
+ const extension=path.extname(String(originalName||"")).toLowerCase().replace(/[^a-z0-9.]/g,"").slice(0,10);
+ const objectPath="songs/"+String(accountId)+"/"+crypto.randomUUID()+extension;
+ const bytes=await fs.readFile(filePath);
+ await storageRequest("object/"+encodeURIComponent(SONG_STORAGE_BUCKET)+"/"+storagePathSegments(objectPath),"POST",bytes,mimeType||"application/octet-stream");
+ return objectPath;
+}
+async function deleteSongFromStorage(objectPath){
+ if(!objectPath||!supabaseReady())return;
+ try{await storageRequest("object/"+encodeURIComponent(SONG_STORAGE_BUCKET)+"/"+storagePathSegments(objectPath),"DELETE");}
+ catch(error){console.error("Stored song delete failed",String(error&&error.message||error));}
+}
+async function signSongStoragePath(objectPath,expiresInSeconds){
+ if(!objectPath||!supabaseReady())return "";
+ const result=await storageRequest("object/sign/"+encodeURIComponent(SONG_STORAGE_BUCKET)+"/"+storagePathSegments(objectPath),"POST",JSON.stringify({expiresIn:Math.max(60,Math.min(86400,Number(expiresInSeconds)||3600))}),"application/json");
+ const signed=String(result&&result.signedURL||result&&result.signedUrl||"");
+ if(!signed)return "";
+ return /^https?:\/\//i.test(signed)?signed:(process.env.SUPABASE_URL.replace(/\/+$/,"")+"/storage/v1"+signed);
+}
+function isYoutubeUrl(url){
+ try{const host=new URL(url).hostname.toLowerCase();return host==="youtube.com"||host==="www.youtube.com"||host==="m.youtube.com"||host==="youtu.be"||host.endsWith(".youtube.com");}catch{return false;}
+}
+function normalizedHttpUrl(raw){
+ try{const u=new URL(String(raw||"").trim());if(u.protocol!=="http:"&&u.protocol!=="https:")return "";u.hash="";return u.href;}catch{return "";}
+}
 async function saveAnalysisHistory(accountId,analysis){const rows=await sb("analysis_history","POST",{account_id:accountId,title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis});const row=Array.isArray(rows)?rows[0]:rows;return row&&row.id?String(row.id):"";}
 async function updateAnalysisHistory(id,accountId,analysis){if(!id)return;await sb("analysis_history?id=eq."+encodeURIComponent(id)+"&account_id=eq."+encodeURIComponent(accountId),"PATCH",{title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis});}
 async function stripeRequest(endpoint,method,params){if(!process.env.STRIPE_SECRET_KEY){const e=new Error("Stripe עדיין לא הוגדר בשרת.");e.code="STRIPE_NOT_CONFIGURED";throw e;}let url="https://api.stripe.com"+endpoint;const headers={Authorization:"Bearer "+process.env.STRIPE_SECRET_KEY};let body;if(method==="GET"){const q=params?new URLSearchParams(params).toString():"";if(q)url+="?"+q;}else if(params){headers["Content-Type"]="application/x-www-form-urlencoded";body=new URLSearchParams(params).toString();}const resp=await fetch(url,{method:method||"GET",headers:headers,body:body}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"Stripe request failed");e.stripeStatus=resp.status;throw e;}return data;}
