@@ -390,6 +390,82 @@ function normalizeSectionLabels(lines) {
   });
 }
 
+function collapseAdjacentChordEvents(chords, maxGapSeconds) {
+  const maxGap = Math.max(0, Number(maxGapSeconds) || 0.9);
+  const sorted = (Array.isArray(chords) ? chords : [])
+    .map(function(c) {
+      return {
+        start: Math.max(0, Number(c && c.start) || 0),
+        end: Math.max(0, Number(c && c.end) || 0),
+        chord: String(c && c.chord || "").trim(),
+        confidence: Math.max(0, Math.min(1, Number(c && c.confidence) || 0))
+      };
+    })
+    .filter(function(c) {
+      return c.chord && c.end > c.start;
+    })
+    .sort(function(a, b) {
+      return a.start - b.start;
+    });
+
+  const merged = [];
+  for (const current of sorted) {
+    const previous = merged[merged.length - 1];
+    if (
+      previous &&
+      previous.chord === current.chord &&
+      current.start <= previous.end + maxGap
+    ) {
+      previous.end = Math.max(previous.end, current.end);
+      previous.confidence = Math.max(previous.confidence, current.confidence);
+      continue;
+    }
+    merged.push(current);
+  }
+  return merged;
+}
+
+function placeChordAnchors(lines, chords) {
+  (lines || []).forEach(function(line) {
+    (line.words || []).forEach(function(word) {
+      word.chord = null;
+    });
+  });
+
+  const allWords = [];
+  (lines || []).forEach(function(line) {
+    (line.words || []).forEach(function(word, index) {
+      const start = Number(word.start);
+      const end = Number(word.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+      allWords.push({
+        word: word,
+        line: line,
+        index: index,
+        start: start,
+        end: Math.max(start, end)
+      });
+    });
+  });
+  allWords.sort(function(a, b) {
+    return a.start - b.start || a.index - b.index;
+  });
+
+  let previousAnchorEnd = -Infinity;
+  for (const chord of (Array.isArray(chords) ? chords : [])) {
+    const start = Number(chord.start);
+    const end = Number(chord.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+
+    const suitable = allWords.find(function(item) {
+      return item.end >= start - 0.20 && item.start < end + 0.20 && item.end > previousAnchorEnd + 0.001;
+    });
+    if (!suitable) continue;
+    suitable.word.chord = chord.chord;
+    previousAnchorEnd = suitable.end;
+  }
+}
+
 function cleanAnalysis(value) {
   const data = value && typeof value === "object" ? value : {};
   const duration = Number(data.duration) > 0 ? Number(data.duration) : 0;
@@ -420,18 +496,7 @@ function cleanAnalysis(value) {
 
   const outLines = normalizeSectionLabels(rawLines);
 
-  const outChords = chords.map(function(c) {
-    return {
-      start: Math.max(0, Number(c.start) || 0),
-      end: Math.max(0, Number(c.end) || 0),
-      chord: String(c.chord || "").trim(),
-      confidence: Math.max(0, Math.min(1, Number(c.confidence) || 0))
-    };
-  }).filter(function(c) {
-    return c.chord;
-  }).sort(function(a, b) {
-    return a.start - b.start;
-  });
+  const outChords = collapseAdjacentChordEvents(chords);
 
   for (let i = 0; i < outChords.length; i += 1) {
     const nextStart = outChords[i + 1] ? outChords[i + 1].start : outChords[i].end;
@@ -775,15 +840,16 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
       const error=new Error(String(detail)+" (HTTP "+response.status+")");
       error.chordinoStatus=response.status;throw error;
     }
-    const chords=Array.isArray(data.chords)?data.chords.map(function(chord){
+    const rawChords=Array.isArray(data.chords)?data.chords.map(function(chord){
       return {
         start:Math.max(0,Number(chord&&chord.start)||0),
         end:Math.max(0,Number(chord&&chord.end)||0),
         chord:String(chord&&chord.chord||"").trim()
       };
     }).filter(function(chord){
-      return chord.chord&&chord.end>=chord.start;
+      return chord.chord&&chord.end>chord.start;
     }).sort(function(a,b){return a.start-b.start;}) : [];
+    const chords=collapseAdjacentChordEvents(rawChords,0.9);
     if(!chords.length){
       const error=new Error("Chordino לא החזיר אף אירוע אקורד לקובץ.");
       error.code="EMPTY_CHORDINO";throw error;
@@ -940,17 +1006,12 @@ app.post("/api/analyze",async function(req,res){
     if(!(finalAnalysis.lines||[]).length)throw new Error("הניתוח הסופי של Gemini לא החזיר תמלול");
     // Chordino is the authoritative chord detector. Gemini contributes lyrics,
     // metadata and key context only; never replace the detected chord timeline.
-    finalAnalysis.chords=chordino.chords.map(function(chord){
+    finalAnalysis.chords=collapseAdjacentChordEvents(chordino.chords,0.9).map(function(chord){
       return {start:Math.max(0,Number(chord.start)||0),end:Math.max(0,Number(chord.end)||0),chord:String(chord.chord||"").trim(),confidence:0.8};
     }).filter(function(chord){return chord.chord&&chord.end>chord.start;});
-    finalAnalysis.lines.forEach(function(line){
-      (line.words||[]).forEach(function(word){
-        const time=(Number(word.start)+Number(word.end))/2;
-        let active=null;
-        for(const chord of finalAnalysis.chords){if(chord.start<=time&&time<chord.end)active=chord;else if(chord.start>time)break;}
-        word.chord=active?active.chord:null;
-      });
-    });
+    // Put each detected chord above the first suitable lyric word only.
+    // Never repeat the same sustained chord above every following word.
+    placeChordAnchors(finalAnalysis.lines,finalAnalysis.chords);
     if(!finalAnalysis.chords.length)throw new Error("Chordino לא סיפק ציר אקורדים תקין");
     logOperation(req.operationId,"final_reconciliation_completed","התמלול והמטא-נתונים הושלמו; ציר האקורדים הסופי נלקח ישירות מ-Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+finalAnalysis.chords.length+" אקורדים");
 
