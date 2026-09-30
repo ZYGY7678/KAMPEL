@@ -493,7 +493,31 @@ app.get("/api/auth/me",async function(req,res){
 });
 app.get("/api/admin/users",async function(req,res){const session=await authSession(req);if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});try{const grants=await loadPremiumGrants();res.json({users:Object.keys(grants).filter(id=>grants[id]===true)});}catch(error){console.error(error);res.status(503).json({error:"לא ניתן לטעון את רשימת הרשאות Premium"});}});
 app.post("/api/admin/premium",async function(req,res){const session=await authSession(req);if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});const email=normalizeEmail(req.body&&req.body.email),enabled=Boolean(req.body&&req.body.enabled);if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return res.status(400).json({error:"כתובת אימייל לא תקינה"});if(supabaseReady()){await sb("premium_grants?on_conflict=email","POST",{email:email,granted:enabled,updated_at:new Date().toISOString()});const account=await sb("app_accounts?select=account_id&email=eq."+encodeURIComponent(email)+"&limit=1");if(account.length)await sb("app_accounts?email=eq."+encodeURIComponent(email),"PATCH",{premium_granted:enabled,updated_at:new Date().toISOString()});}else{const grants=await loadPremiumGrants();if(enabled)grants[email]=true;else delete grants[email];await savePremiumGrants();}res.json({ok:true,email:email,premium:enabled});});
-app.get("/api/history",async function(req,res){const session=await authSession(req);if(!session)return res.status(401).json({error:"לא מחובר"});if(!supabaseReady())return res.json({history:[]});try{const accountId=accountIdForUser(session.user),rows=await sb("analysis_history?select=id,title,artist,analysis,created_at&account_id=eq."+encodeURIComponent(accountId)+"&order=created_at.desc&limit=50");res.setHeader("Cache-Control","no-store");res.json({history:rows||[]});}catch(error){console.error(error);res.status(503).json({error:"לא ניתן לטעון היסטוריית ניתוחים"});}});
+app.get("/api/history",async function(req,res){
+ const session=await authSession(req);if(!session)return res.status(401).json({error:"לא מחובר"});
+ if(!supabaseReady())return res.json({history:[]});
+ try{
+  const accountId=accountIdForUser(session.user);
+  const rows=await sb("analysis_history?select=id,title,artist,analysis,created_at,audio_path,original_filename,mime_type,file_size&account_id=eq."+encodeURIComponent(accountId)+"&order=created_at.desc&limit=1000");
+  const history=await Promise.all((rows||[]).map(async function(row){
+   let audioUrl="";
+   try{audioUrl=row.audio_path?await signSongStoragePath(row.audio_path,3600):"";}catch{}
+   return Object.assign({},row,{audioUrl:audioUrl});
+  }));
+  res.setHeader("Cache-Control","no-store");res.json({history:history});
+ }catch(error){console.error(error);res.status(503).json({error:"לא ניתן לטעון את השירים השמורים"});}
+});
+app.put("/api/history/:id",async function(req,res){
+ const session=await authSession(req);if(!session)return res.status(401).json({error:"לא מחובר"});
+ const id=String(req.params.id||"").trim();
+ if(!/^[0-9a-f-]{20,80}$/i.test(id))return res.status(400).json({error:"מזהה שיר לא תקין"});
+ const analysis=req.body&&req.body.analysis;
+ if(!analysis||typeof analysis!=="object")return res.status(400).json({error:"חסר ניתוח לשמירה"});
+ try{
+  await updateAnalysisHistory(id,accountIdForUser(session.user),cleanAnalysis(analysis));
+  res.setHeader("Cache-Control","no-store");res.json({ok:true});
+ }catch(error){console.error("Auto-save history failed",String(error&&error.message||error));res.status(500).json({error:"שמירת השינויים נכשלה"});}
+});
 app.post("/api/auth/logout",async function(req,res){const token=cookieToken(req);if(token){sessions.delete(token);if(supabaseReady())try{await sb("auth_sessions?token_hash=eq."+tokenHash(token),"DELETE");}catch(e){console.error("Session revoke failed",String(e.message||e));}}clearSessionCookie(res);res.json({ok:true});});
 let premiumOfferCache=null;
 let premiumOfferCacheAt=0;
