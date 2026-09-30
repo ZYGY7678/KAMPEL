@@ -626,14 +626,14 @@ async function loadAccountState(){
    }else{
      account.textContent="לא מחובר";login.classList.remove("hidden");if(register)register.classList.remove("hidden");logout.classList.add("hidden");hideApiOnboarding();
    }
-   await loadPremiumInfo();updateUploadGate();
+   try{await loadPremiumInfo();}catch(premiumError){console.warn("Premium status refresh failed",String(premiumError&&premiumError.message||premiumError));}updateUploadGate();
    var params=new URLSearchParams(location.search),sessionId=params.get("session_id");
    if(sessionId&&data.authenticated){
      var confirmResponse=await fetch("/api/premium/confirm?session_id="+encodeURIComponent(sessionId),{cache:"no-store"}),confirmData=await confirmResponse.json().catch(function(){return{}});
      if(!confirmResponse.ok)throw new Error(confirmData.error||"אימות התשלום נכשל");
      history.replaceState({},document.title,location.pathname);
-     var refreshed=await fetch("/api/auth/me",{cache:"no-store"}),refreshedData=await refreshed.json();
-     accountState=Object.assign(accountState,refreshedData||{},{premium:true});window.accountState=accountState;setError("homeError","");updateUploadGate();await loadPremiumInfo();
+     var refreshed=await fetch("/api/auth/me",{cache:"no-store",credentials:"same-origin"}),refreshedData=await refreshed.json();
+     accountState=Object.assign(accountState,refreshedData||{},{premium:true});window.accountState=accountState;setError("homeError","");updateUploadGate();try{await loadPremiumInfo();}catch(premiumError){console.warn("Premium status refresh failed",String(premiumError&&premiumError.message||premiumError));}
    }
  }catch(e){
    accountState=Object.assign({},accountState,{authenticated:false,user:null,premium:false,plan:"standard"});window.accountState=accountState;
