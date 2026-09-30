@@ -518,6 +518,64 @@ app.put("/api/history/:id",async function(req,res){
   res.setHeader("Cache-Control","no-store");res.json({ok:true});
  }catch(error){console.error("Auto-save history failed",String(error&&error.message||error));res.status(500).json({error:"שמירת השינויים נכשלה"});}
 });
+app.post("/api/search-song",async function(req,res){
+ const session=await authSession(req);
+ if(!session)return res.status(401).json({error:"יש להתחבר לחשבון לפני חיפוש שיר"});
+ const apiKey=String(req.headers["x-gemini-api-key"]||"").trim();
+ if(!apiKey)return res.status(401).json({error:"יש להזין מפתח Gemini API לפני חיפוש"});
+ const artist=String(req.body&&req.body.artist||"").trim();
+ const title=String(req.body&&req.body.title||"").trim();
+ const details=String(req.body&&req.body.details||"").trim();
+ if(artist.length<2||title.length<2)return res.status(400).json({error:"יש להזין את השם המלא של הזמר ואת השם המלא של השיר"});
+ const prompt=[
+  "Find the exact song requested below on the public web using Google Search grounding.",
+  "The user needs one precise playable URL for the exact song, ideally the exact YouTube video.",
+  "Artist full name: "+artist,
+  "Song full title: "+title,
+  "Additional optional details: "+(details||"none"),
+  "Search broadly and verify that the selected result matches BOTH artist and song title.",
+  "Never invent, guess, or synthesize a URL.",
+  "Return ONLY JSON: found, artist, title, url, sourceTitle, note.",
+  "The url MUST be one of the URLs returned by Google Search grounding. If no exact verified result exists, found=false and url is empty.",
+  "Prefer a single exact YouTube video over playlists, artist homepages, search pages, lyrics pages, or unrelated covers."
+ ].join("\n");
+ try{
+  const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(SONG_SEARCH_MODEL)+":generateContent",{
+   method:"POST",
+   headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
+   body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}],tools:[{google_search:{}}],generationConfig:{temperature:0.1}})
+  });
+  const raw=await response.text();
+  let data={};
+  try{data=raw?JSON.parse(raw):{};}catch{return res.status(502).json({error:"חיפוש השיר החזיר תשובה לא תקינה"});}
+  if(!response.ok){
+   const message=data&&data.error&&data.error.message||"חיפוש Google דרך Gemini נכשל";
+   return res.status(response.status===429?429:502).json({error:message});
+  }
+  const candidate=data.candidates&&data.candidates[0]||{};
+  const parts=candidate.content&&candidate.content.parts||[];
+  const output=parts.map(function(part){return part&&part.text||"";}).join("").trim();
+  let parsed=null;
+  try{parsed=JSON.parse(output);}catch{
+   try{parsed=JSON.parse(output.replace(/^\\s*json\\s*/i,"").replace(/\\s*$/i,""));}catch{}
+  }
+  if(!parsed||typeof parsed!=="object")throw new Error("Gemini לא החזיר תוצאת חיפוש תקינה");
+  const gm=candidate.groundingMetadata||candidate.grounding_metadata||{};
+  const chunks=Array.isArray(gm.groundingChunks)?gm.groundingChunks:Array.isArray(gm.grounding_chunks)?gm.grounding_chunks:[];
+  const groundedUrls=chunks.map(function(chunk){return normalizedHttpUrl(chunk&&chunk.web&&chunk.web.uri||"");}).filter(Boolean);
+  const returnedUrl=normalizedHttpUrl(parsed.url||"");
+  let exact=groundedUrls.find(function(u){return u===returnedUrl;});
+  if(!exact&&returnedUrl)exact=groundedUrls.find(function(u){return u.replace(/\/$/,"")===returnedUrl.replace(/\/$/,"");})||"";
+  if(!exact)exact=groundedUrls.find(isYoutubeUrl)||groundedUrls[0]||"";
+  if(!exact||parsed.found===false){
+   return res.json({found:false,artist:String(parsed.artist||artist),title:String(parsed.title||title),url:"",sourceTitle:String(parsed.sourceTitle||""),note:String(parsed.note||"לא נמצא קישור מדויק ומאומת.")});
+  }
+  return res.json({found:true,artist:String(parsed.artist||artist),title:String(parsed.title||title),url:exact,sourceTitle:String(parsed.sourceTitle||""),note:String(parsed.note||""),downloaderUrl:SONG_DOWNLOADER_URL});
+ }catch(error){
+  console.error("Song search failed",String(error&&error.stack||error));
+  res.status(502).json({error:"חיפוש השיר נכשל: "+String(error&&error.message||error).slice(0,300)});
+ }
+});
 app.post("/api/auth/logout",async function(req,res){const token=cookieToken(req);if(token){sessions.delete(token);if(supabaseReady())try{await sb("auth_sessions?token_hash=eq."+tokenHash(token),"DELETE");}catch(e){console.error("Session revoke failed",String(e.message||e));}}clearSessionCookie(res);res.json({ok:true});});
 let premiumOfferCache=null;
 let premiumOfferCacheAt=0;
