@@ -735,12 +735,26 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
     logOperation(operationIdValue,"chordino_started","שולחים את האודיו למנוע Sonic Annotator + Chordino");
     const bytes=await fs.readFile(filePath),form=new FormData();
     form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
-    const response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
-      method:"POST",
-      headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
-      body:form,
-      signal:controller.signal
-    });
+    let response,connectionError;
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
+          method:"POST",
+          headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
+          body:form,
+          signal:controller.signal
+        });
+        connectionError=null;
+        break;
+      }catch(error){
+        connectionError=error;
+        const transient=error&&(/terminated|socket|fetch failed|ECONNRESET|UND_ERR/i.test(String(error.message||error)));
+        if(!transient||attempt===2||controller.signal.aborted)throw error;
+        logOperation(operationIdValue,"chordino_connection_retry","חיבור למנוע Chordino נותק לפני קבלת תשובה; ניסיון חוזר "+(attempt+2)+" מתוך 3","warning");
+        await new Promise(function(resolve){setTimeout(resolve,1500*(attempt+1));});
+      }
+    }
+    if(!response&&connectionError)throw connectionError;
     const raw=await response.text();let data={};
     try{data=raw?JSON.parse(raw):{};}catch(parseError){
       const contentType=String(response.headers.get("content-type")||"לא צוין");
