@@ -119,6 +119,12 @@ body.theme-day .drop-icon{background:#e8f1f6;color:#287089}body.theme-day .uploa
 body.theme-day .my-songs-dialog,body.theme-day .song-search-dialog,body.theme-day .download-return-dialog{background:#fff}
 body.theme-day .search-form input,body.theme-day .search-form textarea{background:#fff;color:#172333}
 @media(max-width:650px){.saved-song{align-items:flex-start;flex-direction:column}.saved-song-actions{width:100%}.saved-song-actions button{flex:1}.download-return-card{align-items:flex-start;flex-direction:column}}
+
+/* Auth modal: keep all fields reachable on short/mobile screens */
+.account-modal{align-items:start;justify-items:center;overflow-y:auto;overscroll-behavior:contain;padding: max(12px,env(safe-area-inset-top)) 14px max(18px,env(safe-area-inset-bottom));}
+.account-dialog{width:min(440px,100%);max-height:calc(100dvh - 30px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin:auto 0;}
+#authForm{padding-bottom:4px;}
+@media(max-height:620px){.account-modal{align-items:start;padding-top:8px;padding-bottom:8px}.account-dialog{max-height:calc(100dvh - 16px);padding:18px;}}
 </style>
 </head>
 <body>
