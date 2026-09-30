@@ -1299,7 +1299,46 @@ function groupWordsForWordExport(analysis, shift, mode) {
   return groups;
 }
 
-app.post("/api/separate-vocals",async function(req,res){const access=await requireUploadAccess(req,res,{premiumRequired:true,validateGeminiKey:false});if(access!==true)return;upload.single("audio")(req,res,async function(uploadError){if(uploadError){if(uploadError.code==="LIMIT_FILE_SIZE")return res.status(413).json({error:"קובץ ההפרדה גדול מדי (מקסימום 200MB)."});return res.status(400).json({error:"העלאת הקובץ נכשלה: "+String(uploadError.message||uploadError).slice(0,200)});}if(!req.file)return res.status(400).json({error:"לא התקבל קובץ אודיו להפרדה."});try{const bytes=await fs.readFile(req.file.path),audioFile=new File([bytes],path.basename(req.file.originalname||"song-audio"),{type:req.file.mimetype||"audio/mpeg"});if(!process.env.REPLICATE_API_TOKEN)throw new Error("מערכת הפרדת הקול עדיין לא הוגדרה בשרת. חסר REPLICATE_API_TOKEN.");const replicate=new Replicate({auth:process.env.REPLICATE_API_TOKEN}),output=await replicate.run("cjwbw/demucs:25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",{input:{audio:audioFile,stem:"vocals",model_name:"htdemucs_ft",shifts:2,overlap:0.25,clip_mode:"rescale",output_format:"mp3",mp3_bitrate:320}});let vocals=output&&((output.vocals)||output.stems&&output.stems.vocals||(Array.isArray(output)?output.find(function(item){return item&&(/vocal/i.test(String(item.name||item.label||""))||/vocal/i.test(String(item)))}):null));let vocalsUrl=typeof vocals==="string"?vocals:vocals&&typeof vocals.url==="function"?String(vocals.url()):vocals&&typeof vocals.url==="string"?vocals.url:vocals&&typeof vocals.href==="string"?vocals.href:"";if(!/^https:\/\//i.test(vocalsUrl))throw new Error("מודל ההפרדה לא החזיר קישור תקין לקובץ קול הזמר. סוג הפלט: "+(Array.isArray(output)?"array":typeof output)+", keys: "+(output&&typeof output==="object"?Object.keys(output).join(","):"none"));res.json({vocalsUrl:vocalsUrl,model:"Demucs htdemucs_ft"});}catch(error){console.error("Vocal separation failed",String(error&&error.stack||error));res.status(502).json({error:"הפרדת הקול נכשלה: "+String(error&&error.message||error).slice(0,300)});}finally{try{await fs.unlink(req.file.path);}catch{}}});});
+app.post("/api/separate-vocals",async function(req,res){
+  const access=await requireUploadAccess(req,res,{premiumRequired:true,validateGeminiKey:false});
+  if(access!==true)return;
+  upload.single("audio")(req,res,async function(uploadError){
+    if(uploadError){
+      if(uploadError.code==="LIMIT_FILE_SIZE")return res.status(413).json({error:"קובץ ההפרדה גדול מדי (מקסימום 100MB)."});
+      return res.status(400).json({error:"העלאת הקובץ נכשלה: "+String(uploadError.message||uploadError).slice(0,200)});
+    }
+    if(!req.file)return res.status(400).json({error:"לא התקבל קובץ אודיו להפרדה."});
+    try{
+      const token=String(process.env.REPLICATE_API_TOKEN||"").trim();
+      if(!token)throw new Error("מערכת הפרדת הקול לא מופעלת בשרת. חסר REPLICATE_API_TOKEN ב-Render.");
+      const bytes=await fs.readFile(req.file.path);
+      const audioInput=bytes;
+      const replicate=new Replicate({auth:token,useFileOutput:false});
+      const modelVersion="cjwbw/demucs:25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953";
+      const output=await replicate.run(modelVersion,{input:{audio:audioInput,stem:"vocals",model_name:"htdemucs_ft",shifts:2,overlap:0.25,clip_mode:"rescale",output_format:"mp3",mp3_bitrate:320}});
+      let vocalsUrl="";
+      if(output&&typeof output==="object"&&!Array.isArray(output))vocalsUrl=String(output.vocals||"");
+      if(!vocalsUrl&&Array.isArray(output)){
+        const found=output.find(function(item){return typeof item==="string"&&/^https:\/\/.*(?:vocals|vocal)/i.test(item)});
+        if(found)vocalsUrl=String(found);
+      }
+      if(!/^https:\/\//i.test(vocalsUrl)){
+        throw new Error("מודל Demucs לא החזיר קובץ vocals תקין.");
+      }
+      const verify=await fetch(vocalsUrl,{method:"HEAD"}).catch(function(){return null});
+      if(verify&&!verify.ok)throw new Error("קובץ קול הזמר נוצר אך לא ניתן לגשת אליו (HTTP "+verify.status+").");
+      res.setHeader("Cache-Control","no-store");
+      res.json({vocalsUrl:vocalsUrl,model:"Demucs htdemucs_ft",ready:true});
+    }catch(error){
+      console.error("Vocal separation failed",String(error&&error.stack||error));
+      const raw=String(error&&error.message||error);
+      const safe=raw.replace(tokenForError(req),"[מפתח מוסתר]");
+      res.status(502).json({error:"הפרדת הקול נכשלה: "+safe.slice(0,400)});
+    }finally{try{await fs.unlink(req.file.path);}catch{}}
+  });
+});
+
+function tokenForError(_req){return String(process.env.REPLICATE_API_TOKEN||"__never__");}
 
 app.post("/api/export/docx", async function(req, res) {
   try {
