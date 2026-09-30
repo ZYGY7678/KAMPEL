@@ -408,8 +408,15 @@ function collapseAdjacentChordEvents(chords, maxGapSeconds) {
       return a.start - b.start;
     });
 
+  // Ignore a very brief isolated Chordino blip when it is surrounded by the same chord.
+  // This removes obvious one-frame misclassifications without rewriting real chord changes.
+  const stable = sorted.filter(function(current, index, events) {
+    if (current.end - current.start >= 0.32 || index === 0 || index === events.length - 1) return true;
+    const previous = events[index - 1], next = events[index + 1];
+    return !(previous.chord === next.chord && current.start - previous.end <= 0.25 && next.start - current.end <= 0.25);
+  });
   const merged = [];
-  for (const current of sorted) {
+  for (const current of stable) {
     const previous = merged[merged.length - 1];
     if (
       previous &&
