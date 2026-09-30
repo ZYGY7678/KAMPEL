@@ -310,12 +310,13 @@ function openSavedSong(id){
   setStage("editor");renderEditor();showVerificationReady();
 }
 function scheduleAutoSave(){
-  if(!currentHistoryId||!accountState.authenticated)return;
+  if(!currentHistoryId||!accountState.authenticated||!analysis)return;
   if(autoSaveTimer)clearTimeout(autoSaveTimer);
+  var saveId=String(currentHistoryId),snapshot=JSON.parse(JSON.stringify(analysis));
   autoSaveTimer=setTimeout(async function(){
     autoSaveTimer=null;
     try{
-      var r=await fetch("/api/history/"+encodeURIComponent(currentHistoryId),{method:"PUT",credentials:"include",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({analysis:analysis})});
+      var r=await fetch("/api/history/"+encodeURIComponent(saveId),{method:"PUT",credentials:"include",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({analysis:snapshot})});
       if(!r.ok)console.warn("Auto-save failed",r.status);
     }catch(e){console.warn("Auto-save failed",String(e&&e.message||e));}
   },700);
