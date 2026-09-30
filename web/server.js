@@ -2,17 +2,34 @@ import express from "express";
 import multer from "multer";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import ffmpegPath from "ffmpeg-static";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "music-metadata";
 import Replicate from "replicate";
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from "docx";
 
+const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 const uploadDir = path.join(__dirname, ".uploads");
 await fs.mkdir(uploadDir, { recursive: true });
+
+async function convertAudioToWav(inputPath, outputPath) {
+  if (!ffmpegPath) throw new Error("FFmpeg לא זמין בסביבת השרת");
+  await execFileAsync(ffmpegPath, [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-i", inputPath,
+    "-ar", "16000",
+    "-ac", "1",
+    "-c:a", "pcm_s16le",
+    outputPath
+  ], { maxBuffer: 1024 * 1024 });
+}
+
 
 const app = express();
 app.disable("x-powered-by");
@@ -937,7 +954,7 @@ app.post("/api/export/docx", async function(req, res) {
 
 
 const selfTests = new Map();
-const SELF_TEST_AUDIO_URL = "https://storage.googleapis.com/generativeai-downloads/data/sample.mp3";
+const SELF_TEST_AUDIO_URL = "https://commons.wikimedia.org/wiki/Special:Redirect/file/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg";
 
 function selfTestAuthorized(req) {
   return process.env.SELF_TEST_ENABLED === "true" &&
@@ -990,11 +1007,17 @@ async function runSelfTest(id) {
     const audioResponse = await fetch(SELF_TEST_AUDIO_URL);
     if (!audioResponse.ok) throw new Error("הורדת אודיו לבדיקה נכשלה: HTTP " + audioResponse.status);
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-    const mimeType = "audio/mp3";
     if (!audioBuffer.length) throw new Error("קובץ הבדיקה ריק");
-    const audioBase64 = audioBuffer.toString("base64");
-    const filename = "google-sample.mp3";
-    state.audioBytes = audioBuffer.length;
+    const sourcePath = path.join(uploadDir, "self-test-source-" + id + ".ogg");
+    const wavPath = path.join(uploadDir, "self-test-" + id + ".wav");
+    await fs.writeFile(sourcePath, audioBuffer);
+    await convertAudioToWav(sourcePath, wavPath);
+    const wavBuffer = await fs.readFile(wavPath);
+    const mimeType = "audio/wav";
+    const audioBase64 = wavBuffer.toString("base64");
+    const filename = "amazing-grace.wav";
+    state.audioBytes = wavBuffer.length;
+    state.sourceAudioBytes = audioBuffer.length;
     state.mimeType = mimeType;
 
     setStage("transcription", "Gemini 3.5 Transcribe");
@@ -1002,11 +1025,9 @@ async function runSelfTest(id) {
     state.checks.transcription = { ok: Boolean(transcript && transcript.trim()), chars: String(transcript || "").length };
 
     setStage("chordino", "Sonic Annotator + Chordino");
-    const tempPath = path.join(uploadDir, "self-test-" + id + ".mp3");
-    await fs.writeFile(tempPath, audioBuffer);
     try {
-      const audioMetadata = await extractAudioMetadata(tempPath);
-      const chordino = await analyzeWithChordino(tempPath, filename, mimeType, id);
+      const audioMetadata = await extractAudioMetadata(wavPath);
+      const chordino = await analyzeWithChordino(sourcePath, filename, "audio/ogg", id);
       state.checks.chordino = { ok: Array.isArray(chordino.chords) && chordino.chords.length > 0, events: chordino.chords.length, duration: chordino.duration };
 
       setStage("reconciliation", "Gemini 3.8 Flash משלב תמלול + Chordino");
@@ -1039,7 +1060,8 @@ async function runSelfTest(id) {
       state.result = {
         ok: true,
         source: SELF_TEST_AUDIO_URL,
-        audioBytes: audioBuffer.length,
+        audioBytes: wavBuffer.length,
+        sourceAudioBytes: audioBuffer.length,
         mimeType,
         models: { transcription: TRANSCRIBE_MODEL, reconciliation: MODEL, verification: MODEL },
         checks: state.checks,
@@ -1048,7 +1070,8 @@ async function runSelfTest(id) {
       state.updatedAt = Date.now();
       state.durationMs = Date.now() - startedAt;
     } finally {
-      try { await fs.unlink(tempPath); } catch {}
+      try { await fs.unlink(sourcePath); } catch {}
+      try { await fs.unlink(wavPath); } catch {}
     }
   } catch (error) {
     const safeMessage = String(error && error.message || error).replace(apiKey || "__never__", "[מפתח מוסתר]");
