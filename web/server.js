@@ -432,6 +432,33 @@ function collapseAdjacentChordEvents(chords, maxGapSeconds) {
   return merged;
 }
 
+function quantizeChordsToFourBeats(chords, bpm, duration) {
+  const tempo = Number(bpm);
+  const total = Number(duration);
+  if (!Number.isFinite(tempo) || tempo < 40 || tempo > 240 || !Number.isFinite(total) || total <= 0) return chords;
+  const barSeconds = 4 * 60 / tempo;
+  const events = collapseAdjacentChordEvents(chords, 0.08);
+  const bars = [];
+  for (let start = 0; start < total; start += barSeconds) {
+    const end = Math.min(total, start + barSeconds);
+    const weights = new Map();
+    for (const event of events) {
+      const overlap = Math.max(0, Math.min(end, event.end) - Math.max(start, event.start));
+      if (overlap > 0) weights.set(event.chord, (weights.get(event.chord) || 0) + overlap);
+    }
+    if (!weights.size) continue;
+    let selected = "", selectedWeight = 0;
+    for (const [chord, weight] of weights) {
+      if (weight > selectedWeight) { selected = chord; selectedWeight = weight; }
+    }
+    if (!selected) continue;
+    const previous = bars[bars.length - 1];
+    if (previous && previous.chord === selected) previous.end = end;
+    else bars.push({ start: start, end: end, chord: selected, confidence: 0.8 });
+  }
+  return bars;
+}
+
 function placeChordAnchors(lines, chords) {
   (lines || []).forEach(function(line) {
     (line.words || []).forEach(function(word) {
@@ -1013,9 +1040,9 @@ app.post("/api/analyze",async function(req,res){
     if(!(finalAnalysis.lines||[]).length)throw new Error("הניתוח הסופי של Gemini לא החזיר תמלול");
     // Chordino is the authoritative chord detector. Gemini contributes lyrics,
     // metadata and key context only; never replace the detected chord timeline.
-    finalAnalysis.chords=collapseAdjacentChordEvents(chordino.chords,0.9).map(function(chord){
+    finalAnalysis.chords=quantizeChordsToFourBeats(collapseAdjacentChordEvents(chordino.chords,0.9).map(function(chord){
       return {start:Math.max(0,Number(chord.start)||0),end:Math.max(0,Number(chord.end)||0),chord:String(chord.chord||"").trim(),confidence:0.8};
-    }).filter(function(chord){return chord.chord&&chord.end>chord.start;});
+    }).filter(function(chord){return chord.chord&&chord.end>chord.start;}),finalAnalysis.bpm,finalAnalysis.duration);
     // Put each detected chord above the first suitable lyric word only.
     // Never repeat the same sustained chord above every following word.
     placeChordAnchors(finalAnalysis.lines,finalAnalysis.chords);
