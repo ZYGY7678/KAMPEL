@@ -904,7 +904,9 @@ app.post("/api/analyze",async function(req,res){
       "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n"+
       transcript+
       "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+
-      JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords});
+      JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords})+
+      "\n\nMUSICAL CONTEXT RULES:\n"+
+      "Use the Chordino chord sequence as the primary evidence for the song's tonal center and likely major/minor key. Use that key context to interpret lyric timing and metadata, but do not invent, delete, rename, simplify, or move any chord from the Chordino timeline. Preserve chord qualities exactly as detected by the configured Chordino transform.";
     const finalAnalysis=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,reconciliationPrompt,req.operationId,"final_reconciliation"));
     if(!(finalAnalysis.lines||[]).length)throw new Error("הניתוח הסופי של Gemini לא החזיר תמלול");
     // Chordino is the authoritative chord detector. Gemini contributes lyrics,
