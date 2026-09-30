@@ -937,7 +937,7 @@ app.post("/api/export/docx", async function(req, res) {
 
 
 const selfTests = new Map();
-const SELF_TEST_AUDIO_URL = "https://storage.googleapis.com/generativeai-downloads/data/Apollo-11_Day-01-Highlights-10s.mp3";
+const SELF_TEST_AUDIO_URL = "https://storage.googleapis.com/generativeai-downloads/data/sample.mp3";
 
 function selfTestAuthorized(req) {
   return process.env.SELF_TEST_ENABLED === "true" &&
@@ -993,7 +993,7 @@ async function runSelfTest(id) {
     const mimeType = "audio/mp3";
     if (!audioBuffer.length) throw new Error("קובץ הבדיקה ריק");
     const audioBase64 = audioBuffer.toString("base64");
-    const filename = "apollo-11-highlights.mp3";
+    const filename = "google-sample.mp3";
     state.audioBytes = audioBuffer.length;
     state.mimeType = mimeType;
 
