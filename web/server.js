@@ -937,7 +937,7 @@ app.post("/api/export/docx", async function(req, res) {
 
 
 const selfTests = new Map();
-const SELF_TEST_AUDIO_URL = "https://commons.wikimedia.org/wiki/Special:Redirect/file/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg";
+const SELF_TEST_AUDIO_URL = "https://upload.wikimedia.org/wikipedia/commons/transcoded/6/6e/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg.mp3";
 
 function selfTestAuthorized(req) {
   return process.env.SELF_TEST_ENABLED === "true" &&
@@ -974,6 +974,7 @@ function selfTestTimelineValid(analysis) {
 
 async function runSelfTest(id) {
   const state = selfTests.get(id);
+  const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
   if (!state) return;
   const startedAt = Date.now();
   const setStage = function(stage, message) {
@@ -984,16 +985,15 @@ async function runSelfTest(id) {
     current.updatedAt = Date.now();
   };
   try {
-    const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
     if (!apiKey) throw new Error("SELF_TEST חסר GEMINI_API_KEY ב-Render");
     setStage("download_test_audio", "מורידים קובץ בדיקה ציבורי");
     const audioResponse = await fetch(SELF_TEST_AUDIO_URL);
     if (!audioResponse.ok) throw new Error("הורדת אודיו לבדיקה נכשלה: HTTP " + audioResponse.status);
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-    const mimeType = String(audioResponse.headers.get("content-type") || "audio/ogg").split(";")[0];
+    const mimeType = String(audioResponse.headers.get("content-type") || "audio/mpeg").split(";")[0] || "audio/mpeg";
     if (!audioBuffer.length) throw new Error("קובץ הבדיקה ריק");
     const audioBase64 = audioBuffer.toString("base64");
-    const filename = "amazing-grace.ogg";
+    const filename = "amazing-grace.mp3";
     state.audioBytes = audioBuffer.length;
     state.mimeType = mimeType;
 
