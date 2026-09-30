@@ -935,6 +935,169 @@ app.post("/api/export/docx", async function(req, res) {
   }
 });
 
+
+const selfTests = new Map();
+const SELF_TEST_AUDIO_URL = "https://commons.wikimedia.org/wiki/Special:Redirect/file/Amazing_Grace_with_vocals_and_guitar_by_Rocks_From_The_Garden_-_20060603.ogg";
+
+function selfTestAuthorized(req) {
+  return process.env.SELF_TEST_ENABLED === "true" &&
+    String(req.query && req.query.token || "") === String(process.env.SELF_TEST_TOKEN || "");
+}
+
+function selfTestTimelineValid(analysis) {
+  if (!analysis || !Array.isArray(analysis.lines) || !Array.isArray(analysis.chords)) return false;
+  const duration = Number(analysis.duration) || 0;
+  const words = [];
+  for (const line of analysis.lines) {
+    for (const word of (line && line.words) || []) {
+      const start = Number(word && word.start);
+      const end = Number(word && word.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return false;
+      if (duration && end > duration + 0.5) return false;
+      words.push({start, end});
+    }
+  }
+  for (const chord of analysis.chords) {
+    const start = Number(chord && chord.start);
+    const end = Number(chord && chord.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return false;
+    if (duration && end > duration + 0.5) return false;
+  }
+  for (let i = 1; i < words.length; i += 1) {
+    if (words[i].start + 0.25 < words[i - 1].start) return false;
+  }
+  for (let i = 1; i < analysis.chords.length; i += 1) {
+    if (Number(analysis.chords[i].start) + 0.01 < Number(analysis.chords[i - 1].start)) return false;
+  }
+  return true;
+}
+
+async function runSelfTest(id) {
+  const state = selfTests.get(id);
+  if (!state) return;
+  const startedAt = Date.now();
+  const setStage = function(stage, message) {
+    const current = selfTests.get(id);
+    if (!current) return;
+    current.stage = stage;
+    current.message = message || "";
+    current.updatedAt = Date.now();
+  };
+  try {
+    const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
+    if (!apiKey) throw new Error("SELF_TEST חסר GEMINI_API_KEY ב-Render");
+    setStage("download_test_audio", "מורידים קובץ בדיקה ציבורי");
+    const audioResponse = await fetch(SELF_TEST_AUDIO_URL);
+    if (!audioResponse.ok) throw new Error("הורדת אודיו לבדיקה נכשלה: HTTP " + audioResponse.status);
+    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    const mimeType = String(audioResponse.headers.get("content-type") || "audio/ogg").split(";")[0];
+    if (!audioBuffer.length) throw new Error("קובץ הבדיקה ריק");
+    const audioBase64 = audioBuffer.toString("base64");
+    const filename = "amazing-grace.ogg";
+    state.audioBytes = audioBuffer.length;
+    state.mimeType = mimeType;
+
+    setStage("transcription", "Gemini 3.5 Transcribe");
+    const transcript = await transcribeWithGemini(apiKey, audioBase64, mimeType, id);
+    state.checks.transcription = { ok: Boolean(transcript && transcript.trim()), chars: String(transcript || "").length };
+
+    setStage("chordino", "Sonic Annotator + Chordino");
+    const tempPath = path.join(uploadDir, "self-test-" + id + ".ogg");
+    await fs.writeFile(tempPath, audioBuffer);
+    try {
+      const audioMetadata = await extractAudioMetadata(tempPath);
+      const chordino = await analyzeWithChordino(tempPath, filename, mimeType, id);
+      state.checks.chordino = { ok: Array.isArray(chordino.chords) && chordino.chords.length > 0, events: chordino.chords.length, duration: chordino.duration };
+
+      setStage("reconciliation", "Gemini 3.8 Flash משלב תמלול + Chordino");
+      const reconciliationPrompt = PRIMARY_PROMPT +
+        metadataPromptBlock(filename, audioMetadata) +
+        "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n" +
+        transcript +
+        "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n" +
+        JSON.stringify({ source: "Chordino via Sonic Annotator", duration: chordino.duration, chords: chordino.chords });
+      const first = cleanAnalysis(await analyzeWithGemini(apiKey, audioBase64, mimeType, reconciliationPrompt, id, "final_reconciliation"));
+      if (!Array.isArray(first.lines) || !first.lines.length || !Array.isArray(first.chords) || !first.chords.length) {
+        throw new Error("הפלט הראשוני של Gemini לא הכיל גם מילים וגם אקורדים");
+      }
+      state.checks.reconciliation = { ok: true, lines: first.lines.length, chords: first.chords.length, timelineValid: selfTestTimelineValid(first) };
+
+      setStage("verification", "Gemini 3.8 Flash מאמת מחדש את התוצאה");
+      const verifyPrompt = VERIFY_PREFIX + metadataPromptBlock(filename, audioMetadata) + "\nCandidate JSON:\n" + JSON.stringify(first);
+      const verified = cleanAnalysis(await analyzeWithGemini(apiKey, audioBase64, mimeType, verifyPrompt, id, "analysis_verify"));
+      if (!Array.isArray(verified.lines) || !verified.lines.length || !Array.isArray(verified.chords) || !verified.chords.length) {
+        throw new Error("פלט האימות של Gemini לא הכיל גם מילים וגם אקורדים");
+      }
+      state.checks.verification = { ok: true, lines: verified.lines.length, chords: verified.chords.length, timelineValid: selfTestTimelineValid(verified) };
+      if (!state.checks.reconciliation.timelineValid || !state.checks.verification.timelineValid) {
+        throw new Error("נמצאה בעיית ציר זמן בתוצאה");
+      }
+
+      state.status = "completed";
+      state.stage = "completed";
+      state.message = "הבדיקה המלאה הושלמה בהצלחה";
+      state.result = {
+        ok: true,
+        source: SELF_TEST_AUDIO_URL,
+        audioBytes: audioBuffer.length,
+        mimeType,
+        models: { transcription: TRANSCRIBE_MODEL, reconciliation: MODEL, verification: MODEL },
+        checks: state.checks,
+        analysis: verified
+      };
+      state.updatedAt = Date.now();
+      state.durationMs = Date.now() - startedAt;
+    } finally {
+      try { await fs.unlink(tempPath); } catch {}
+    }
+  } catch (error) {
+    const safeMessage = String(error && error.message || error).replace(apiKey || "__never__", "[מפתח מוסתר]");
+    state.status = "failed";
+    state.stage = "failed";
+    state.message = safeMessage.slice(0, 800);
+    state.updatedAt = Date.now();
+    state.durationMs = Date.now() - startedAt;
+  }
+}
+
+app.get("/api/self-test/start", function(req, res) {
+  if (!selfTestAuthorized(req)) return res.status(404).json({ error: "Not found" });
+  const running = Array.from(selfTests.values()).find(function(item) { return item.status === "running"; });
+  if (running) return res.json({ ok: true, existing: true, id: running.id, stage: running.stage, status: running.status });
+  const id = crypto.randomBytes(10).toString("hex");
+  selfTests.set(id, { id: id, status: "running", stage: "starting", message: "מתחיל בדיקה", checks: {}, startedAt: Date.now(), updatedAt: Date.now() });
+  res.json({ ok: true, id: id, existing: false, stage: "starting", status: "running" });
+  runSelfTest(id).catch(function(error) {
+    const state = selfTests.get(id);
+    if (!state) return;
+    state.status = "failed";
+    state.stage = "failed";
+    state.message = String(error && error.message || error).slice(0, 800);
+    state.updatedAt = Date.now();
+  });
+});
+
+app.get("/api/self-test/status", function(req, res) {
+  if (!selfTestAuthorized(req)) return res.status(404).json({ error: "Not found" });
+  const id = String(req.query && req.query.id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+  const state = selfTests.get(id);
+  if (!state) return res.status(404).json({ error: "בדיקה לא נמצאה" });
+  const out = {
+    id: state.id,
+    status: state.status,
+    stage: state.stage,
+    message: state.message,
+    startedAt: state.startedAt,
+    updatedAt: state.updatedAt,
+    durationMs: state.durationMs || null,
+    checks: state.checks || {}
+  };
+  if (state.status === "completed") out.result = state.result;
+  if (state.status === "failed") out.error = state.message;
+  res.setHeader("Cache-Control", "no-store");
+  res.json(out);
+});
+
 app.use(express.static(publicDir));
 
 const port = Number(process.env.PORT || 10000);
