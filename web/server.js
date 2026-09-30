@@ -196,7 +196,16 @@ function isYoutubeUrl(url){
 function normalizedHttpUrl(raw){
  try{const u=new URL(String(raw||"").trim());if(u.protocol!=="http:"&&u.protocol!=="https:")return "";u.hash="";return u.href;}catch{return "";}
 }
-async function saveAnalysisHistory(accountId,analysis){const rows=await sb("analysis_history","POST",{account_id:accountId,title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis});const row=Array.isArray(rows)?rows[0]:rows;return row&&row.id?String(row.id):"";}
+async function saveAnalysisHistory(accountId,analysis,meta){
+ const payload={account_id:accountId,title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis,
+  audio_path:meta&&meta.audioPath?String(meta.audioPath):null,
+  original_filename:meta&&meta.originalFilename?String(meta.originalFilename):null,
+  mime_type:meta&&meta.mimeType?String(meta.mimeType):null,
+  file_size:meta&&Number.isFinite(Number(meta.fileSize))?Number(meta.fileSize):null};
+ const rows=await sb("analysis_history","POST",payload);
+ const row=Array.isArray(rows)?rows[0]:rows;
+ return row&&row.id?String(row.id):"";
+}
 async function updateAnalysisHistory(id,accountId,analysis){if(!id)return;await sb("analysis_history?id=eq."+encodeURIComponent(id)+"&account_id=eq."+encodeURIComponent(accountId),"PATCH",{title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis});}
 async function stripeRequest(endpoint,method,params){if(!process.env.STRIPE_SECRET_KEY){const e=new Error("Stripe עדיין לא הוגדר בשרת.");e.code="STRIPE_NOT_CONFIGURED";throw e;}let url="https://api.stripe.com"+endpoint;const headers={Authorization:"Bearer "+process.env.STRIPE_SECRET_KEY};let body;if(method==="GET"){const q=params?new URLSearchParams(params).toString():"";if(q)url+="?"+q;}else if(params){headers["Content-Type"]="application/x-www-form-urlencoded";body=new URLSearchParams(params).toString();}const resp=await fetch(url,{method:method||"GET",headers:headers,body:body}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"Stripe request failed");e.stripeStatus=resp.status;throw e;}return data;}
 async function stripeHasPaidPremium(id){if(!process.env.STRIPE_SECRET_KEY)return false;const safe=String(id).replace(/"/g,'\"'),query='metadata["chord_studio_premium"]:"1" AND metadata["account_id"]:"'+safe+'" AND status:"succeeded" AND currency:"'+PREMIUM_CURRENCY+'" AND amount:'+PREMIUM_AMOUNT,data=await stripeRequest("/v1/payment_intents/search","GET",{query:query,limit:"1"});return Boolean(data&&Array.isArray(data.data)&&data.data.some(function(item){return item&&item.status==="succeeded"&&Number(item.amount)===PREMIUM_AMOUNT&&String(item.currency||"").toLowerCase()===PREMIUM_CURRENCY&&item.metadata&&item.metadata.chord_studio_premium==="1"&&item.metadata.account_id===id;}));}
