@@ -20,7 +20,7 @@ SONIC_ANNOTATOR_BIN = os.getenv("SONIC_ANNOTATOR_BIN", "/usr/local/bin/sonic-ann
 VAMP_PATH = os.getenv("VAMP_PATH", "/opt/vamp")
 CHORDINO_TRANSFORM = os.getenv(
     "CHORDINO_TRANSFORM",
-    "vamp:nnls-chroma:chordino:simplechord",
+    "vamp:nnls-chroma:chordino:chord",
 )
 CHORDINO_TIMEOUT_SECONDS = max(
     30, int(os.getenv("CHORDINO_TIMEOUT_SECONDS", "180"))
@@ -164,8 +164,9 @@ def _run_chordino(path: str, duration: float) -> list[dict]:
                 smoothed.pop(index)
             elif left and right:
                 target = left if (left["end"] - left["start"]) >= (right["end"] - right["start"]) else right
-                target["end"] = max(target["end"], event["end"]) if target is left else target["end"]
-                if target is right:
+                if target is left:
+                    target["end"] = max(target["end"], event["end"])
+                else:
                     target["start"] = min(target["start"], event["start"])
                 smoothed.pop(index)
             elif left:
