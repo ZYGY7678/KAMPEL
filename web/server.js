@@ -698,9 +698,16 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
         e.geminiStatus=response.status;e.geminiCode=data&&data.error&&data.error.status||"";e.geminiApiCode=data&&data.error&&data.error.code||null;
         e.retryAfterSeconds=Number(response.headers.get("retry-after"))||0;throw e;
       }
-      const transcript=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)
-        ?data.candidates[0].content.parts.map(function(part){return part&&part.text||"";}).join("")
-        :"";
+      const transcriptParts=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)
+        ?data.candidates[0].content.parts:[];
+      const transcript=transcriptParts.map(function(part){
+        if(!part)return "";
+        const audioTx=part.audio_transcription||part.audioTranscription||part.audio_transcription_result||part.audioTranscriptionResult;
+        return String(part.text||audioTx&&(
+          audioTx.text||
+          Array.isArray(audioTx.words)&&audioTx.words.map(function(word){return word&&word.word||"";}).join(" ")
+        )||"");
+      }).filter(Boolean).join("\n").trim()||String(data.output_text||data.outputText||"").trim();
       if(!transcript.trim()){
         const e=new Error("Gemini Transcribe החזיר תמלול ריק");
         e.geminiStatus=response.status;e.geminiCode="EMPTY_TRANSCRIPT";throw e;
