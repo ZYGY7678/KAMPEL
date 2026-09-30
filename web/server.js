@@ -53,8 +53,11 @@ let usageWriteQueue = Promise.resolve();
 const OAUTH_SCOPES = "openid email profile";
 const APP_URL = process.env.APP_URL || "https://chord-studio-frl5.onrender.com";
 const APP_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Jerusalem";
-const DAILY_SONG_LIMIT = 1;
-const PREMIUM_AMOUNT = 1500;
+const WEEKLY_SONG_LIMIT = 1;
+const DAILY_SONG_LIMIT = WEEKLY_SONG_LIMIT;
+const PREMIUM_INTRO_AMOUNT = 1500;
+const PREMIUM_STANDARD_AMOUNT = 3000;
+const PREMIUM_INTRO_SLOTS = 5;
 const PREMIUM_CURRENCY = "ils";
 const PREMIUM_PRODUCT_NAME = "Chord Studio Premium";
 const ADMIN_EMAIL = "zygy7678@gmail.com";
@@ -90,8 +93,32 @@ function clearSessionCookie(res){res.setHeader("Set-Cookie","chord_session=; Pat
 function requireGoogleOAuth(res){if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET){res.status(503).json({error:"Google OAuth עדיין לא הוגדר בשרת. חסרים GOOGLE_CLIENT_ID או GOOGLE_CLIENT_SECRET."});return false;}return true;}
 function normalizeEmail(email){return String(email||"").trim().toLowerCase();}
 function accountIdForUser(user){if(user&&user.accountId)return String(user.accountId);const stable=String(user&&user.id||normalizeEmail(user&&user.email));return crypto.createHash("sha256").update("chord-studio-account:"+stable).digest("hex");}
-function todayKey(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:APP_TIMEZONE,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()),map={};for(const part of parts)if(part.type!=="literal")map[part.type]=part.value;return map.year+"-"+map.month+"-"+map.day;}
-function nextDailyReset(){const now=new Date(),fmt=new Intl.DateTimeFormat("en-US",{timeZone:APP_TIMEZONE,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}),parts=fmt.formatToParts(now),p={};for(const x of parts)if(x.type!=="literal")p[x.type]=Number(x.value);const next=new Date(Date.UTC(p.year,p.month-1,p.day+1)),target=Date.UTC(next.getUTCFullYear(),next.getUTCMonth(),next.getUTCDate());function offsetAt(date){const q={};for(const x of fmt.formatToParts(date))if(x.type!=="literal")q[x.type]=Number(x.value);return Date.UTC(q.year,q.month-1,q.day,q.hour,q.minute,q.second)-Math.floor(date.getTime()/1000)*1000;}let reset=new Date(target-offsetAt(new Date(target)));reset=new Date(target-offsetAt(reset));return reset;}
+function tzParts(date){
+ const fmt=new Intl.DateTimeFormat("en-US",{timeZone:APP_TIMEZONE,weekday:"short",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"});
+ const out={};for(const part of fmt.formatToParts(date))if(part.type!=="literal")out[part.type]=part.value;return out;
+}
+function localCalendarToUtc(year,month,day,hour,minute,second){
+ const approx=new Date(Date.UTC(year,month-1,day,hour||0,minute||0,second||0));
+ const p=tzParts(approx);
+ const localAsUtc=Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second));
+ return new Date(approx.getTime()-(localAsUtc-approx.getTime()));
+}
+function usagePeriodStartKey(date){
+ const p=tzParts(date||new Date()),weekdayIndex={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[p.weekday];
+ const offset=(weekdayIndex+6)%7;
+ const localMidnightAsUtc=new Date(Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day)));
+ localMidnightAsUtc.setUTCDate(localMidnightAsUtc.getUTCDate()-offset);
+ return localMidnightAsUtc.getUTCFullYear()+"-"+String(localMidnightAsUtc.getUTCMonth()+1).padStart(2,"0")+"-"+String(localMidnightAsUtc.getUTCDate()).padStart(2,"0");
+}
+function todayKey(){return usagePeriodStartKey(new Date());}
+function nextDailyReset(){
+ const p=tzParts(new Date());
+ const weekdayIndex={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[p.weekday];
+ const offsetToNextMonday=(8-weekdayIndex)%7||7;
+ const base=new Date(Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day)));
+ base.setUTCDate(base.getUTCDate()+offsetToNextMonday);
+ return localCalendarToUtc(base.getUTCFullYear(),base.getUTCMonth()+1,base.getUTCDate(),0,0,0);
+}
 function usageReservationKey(id,date){return String(id)+"|"+String(date);}
 async function withUsageWriteLock(fn){const p=usageWriteQueue.then(fn,fn);usageWriteQueue=p.catch(function(){});return p;}
 async function loadUsageState(){if(usageStateCache)return usageStateCache;if(usageStateLoadPromise)return usageStateLoadPromise;usageStateLoadPromise=(async function(){try{const raw=await fs.readFile(USAGE_STATE_FILE,"utf8"),parsed=JSON.parse(raw);usageStateCache=parsed&&typeof parsed==="object"?parsed:{users:{}};}catch{usageStateCache={users:{}};}if(!usageStateCache.users||typeof usageStateCache.users!=="object")usageStateCache.users={};usageStateLoadPromise=null;return usageStateCache;})();return usageStateLoadPromise;}
@@ -100,7 +127,7 @@ async function getDailyUsage(id){
  if(supabaseReady()){
    const rows=await sb("rpc/get_daily_song_usage","POST",{p_account_id:id,p_usage_date:todayKey(),p_daily_limit:DAILY_SONG_LIMIT});
    const row=Array.isArray(rows)?(rows[0]||{}):(rows||{});
-   return {date:row.usage_date||todayKey(),used:Number(row.used)||0,reserved:Number(row.reserved)||0,remaining:Math.max(0,Number(row.remaining)||0),resetAt:row.reset_at||null};
+   return {date:row.usage_date||todayKey(),used:Number(row.used)||0,reserved:Number(row.reserved)||0,remaining:Math.max(0,Number(row.remaining)||0),resetAt:nextDailyReset().toISOString()};
  }
  return withUsageWriteLock(async function(){const state=await loadUsageState(),date=todayKey(),entry=state.users[id],used=entry&&entry.date===date?Math.max(0,Number(entry.count)||0):0,res=usageReservations.has(usageReservationKey(id,date));return{date:date,used:used,remaining:Math.max(0,DAILY_SONG_LIMIT-used-(res?1:0)),reserved:res?1:0,resetAt:nextDailyReset().toISOString()};});
 }
@@ -390,19 +417,99 @@ app.get("/api/health",function(_req,res){res.json({
   supabaseConfigured:supabaseReady(),
   persistence:supabaseReady()?"supabase":"local-fallback",
   apiKeyRequired:true,
-  dailyLimit:null
+  weeklyLimit:WEEKLY_SONG_LIMIT
 });});
 
 app.get("/auth/google",function(_req,res){if(!requireGoogleOAuth(res))return;const state=crypto.randomBytes(24).toString("hex");oauthStates.set(state,Date.now());const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:APP_URL+"/auth/google/callback",response_type:"code",scope:OAUTH_SCOPES,state:state});res.redirect("https://accounts.google.com/o/oauth2/v2/auth?"+params.toString());});
 app.get("/auth/google/callback",async function(req,res){const state=String(req.query.state||""),code=String(req.query.code||""),created=oauthStates.get(state);oauthStates.delete(state);if(!created||Date.now()-created>10*60*1000||!code)return res.status(400).send("Google authentication state expired or invalid");try{const tokenRes=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:code,client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:APP_URL+"/auth/google/callback",grant_type:"authorization_code"})}),tokens=await tokenRes.json();if(!tokenRes.ok||!tokens.access_token)throw new Error(tokens.error_description||"Google token exchange failed");const userRes=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+tokens.access_token}}),user=await userRes.json();if(!userRes.ok||!user.sub||user.email_verified!==true)throw new Error("Google user info failed or email is not verified");const sessionId=crypto.randomBytes(32).toString("hex"),userData={id:String(user.sub),name:user.name||user.email||"Google user",email:normalizeEmail(user.email),picture:user.picture||""};if(supabaseReady()){const accountId=await ensureAccount(userData);userData.accountId=accountId;await sb("auth_sessions","POST",{token_hash:tokenHash(sessionId),account_id:accountId,expires_at:new Date(Date.now()+2592000000).toISOString()});}else{sessions.set(sessionId,{user:userData,premium:false,premiumCheckedAt:0,createdAt:Date.now()});}setSessionCookie(res,sessionId);res.redirect("/");}catch(error){console.error(error);res.status(500).send("Google authentication failed");}});
 app.post("/api/auth/register",async function(req,res){const name=String(req.body&&req.body.name||"").trim(),email=normalizeEmail(req.body&&req.body.email),password=String(req.body&&req.body.password||"");if(name.length<2||name.length>80)return res.status(400).json({error:"השם חייב להכיל בין 2 ל־80 תווים"});if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return res.status(400).json({error:"כתובת אימייל לא תקינה"});if(password.length<8||password.length>200)return res.status(400).json({error:"הסיסמה חייבת להכיל לפחות 8 תווים"});if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});try{const exists=await sb("app_accounts?select=account_id&email=eq."+encodeURIComponent(email)+"&limit=1");if(exists.length)return res.status(409).json({error:"כבר קיים חשבון עם כתובת האימייל הזו. נסה להתחבר"});const accountId=accountIdForUser({email}),salt=crypto.randomBytes(16).toString("hex"),hash=crypto.scryptSync(password,salt,64).toString("hex"),passwordHash="scrypt$"+salt+"$"+hash;await sb("app_accounts","POST",{account_id:accountId,email,display_name:name,password_hash:passwordHash,auth_provider:"email",is_admin:email===ADMIN_EMAIL,premium_granted:false});const token=crypto.randomBytes(32).toString("hex");await sb("auth_sessions","POST",{token_hash:tokenHash(token),account_id:accountId,expires_at:new Date(Date.now()+2592000000).toISOString()});setSessionCookie(res,token);res.json({ok:true});}catch(error){console.error("Account registration failed",String(error.message||error));res.status(500).json({error:"לא הצלחנו ליצור חשבון כרגע"});}});
 app.post("/api/auth/login",async function(req,res){const email=normalizeEmail(req.body&&req.body.email),password=String(req.body&&req.body.password||"");if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)||!password)return res.status(400).json({error:"יש להזין אימייל וסיסמה תקינים"});if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});try{const rows=await sb("app_accounts?select=account_id,email,display_name,password_hash&email=eq."+encodeURIComponent(email)+"&limit=1");const account=rows[0];if(!account||!account.password_hash)return res.status(401).json({error:"האימייל או הסיסמה שגויים"});const parts=String(account.password_hash).split("$");if(parts.length!==3||parts[0]!=="scrypt")return res.status(401).json({error:"האימייל או הסיסמה שגויים"});const candidate=crypto.scryptSync(password,parts[1],64),stored=Buffer.from(parts[2],"hex");if(stored.length!==candidate.length||!crypto.timingSafeEqual(stored,candidate))return res.status(401).json({error:"האימייל או הסיסמה שגויים"});const token=crypto.randomBytes(32).toString("hex");await sb("auth_sessions","POST",{token_hash:tokenHash(token),account_id:account.account_id,expires_at:new Date(Date.now()+2592000000).toISOString()});setSessionCookie(res,token);res.json({ok:true});}catch(error){console.error("Account login failed",String(error.message||error));res.status(500).json({error:"לא הצלחנו להתחבר כרגע"});}});
-app.get("/api/auth/me",async function(req,res){try{const session=await authSession(req);if(!session)return res.set("Cache-Control","no-store").json({authenticated:false,premium:false,plan:"standard",dailyRemaining:null,dailyUsed:null,dailyResetAt:null,paymentConfigured:Boolean(process.env.STRIPE_SECRET_KEY),apiKeyRequired:true});const premium=await isPremiumSession(session),usage=premium?{remaining:null,used:null}:await getDailyUsage(accountIdForUser(session.user));return res.set("Cache-Control","no-store").json({authenticated:true,user:session.user,isAdmin:normalizeEmail(session.user.email)===ADMIN_EMAIL,premium:premium,plan:premium?"premium":"standard",dailyRemaining:usage.remaining,dailyUsed:usage.used,dailyResetAt:premium?null:usage.resetAt,paymentConfigured:Boolean(process.env.STRIPE_SECRET_KEY),apiKeyRequired:true});}catch(error){console.error("Account status lookup failed",String(error&&error.message||error));return res.status(503).json({error:"לא ניתן לטעון את מצב החשבון כרגע"});}});
+app.get("/api/auth/me",async function(req,res){
+ try{
+   const session=await authSession(req);
+   if(!session)return res.set("Cache-Control","no-store").json({authenticated:false,premium:false,plan:"standard",weeklyRemaining:null,weeklyUsed:null,weeklyResetAt:null,dailyRemaining:null,dailyUsed:null,dailyResetAt:null,paymentConfigured:Boolean(process.env.STRIPE_SECRET_KEY),apiKeyRequired:true});
+   const premium=await isPremiumSession(session),usage=premium?{remaining:null,used:null}:{};
+   if(!premium)Object.assign(usage,await getDailyUsage(accountIdForUser(session.user)));
+   return res.set("Cache-Control","no-store").json({
+     authenticated:true,user:session.user,isAdmin:normalizeEmail(session.user.email)===ADMIN_EMAIL,
+     premium:premium,plan:premium?"premium":"standard",
+     weeklyRemaining:usage.remaining,weeklyUsed:usage.used,weeklyResetAt:premium?null:usage.resetAt,
+     dailyRemaining:usage.remaining,dailyUsed:usage.used,dailyResetAt:premium?null:usage.resetAt,
+     paymentConfigured:Boolean(process.env.STRIPE_SECRET_KEY),apiKeyRequired:true
+   });
+ }catch(error){
+   console.error("Account status lookup failed",String(error&&error.message||error));
+   return res.status(503).json({error:"לא ניתן לטעון את מצב החשבון כרגע"});
+ }
+});
 app.get("/api/admin/users",async function(req,res){const session=await authSession(req);if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});try{const grants=await loadPremiumGrants();res.json({users:Object.keys(grants).filter(id=>grants[id]===true)});}catch(error){console.error(error);res.status(503).json({error:"לא ניתן לטעון את רשימת הרשאות Premium"});}});
 app.post("/api/admin/premium",async function(req,res){const session=await authSession(req);if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});const email=normalizeEmail(req.body&&req.body.email),enabled=Boolean(req.body&&req.body.enabled);if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return res.status(400).json({error:"כתובת אימייל לא תקינה"});if(supabaseReady()){await sb("premium_grants?on_conflict=email","POST",{email:email,granted:enabled,updated_at:new Date().toISOString()});const account=await sb("app_accounts?select=account_id&email=eq."+encodeURIComponent(email)+"&limit=1");if(account.length)await sb("app_accounts?email=eq."+encodeURIComponent(email),"PATCH",{premium_granted:enabled,updated_at:new Date().toISOString()});}else{const grants=await loadPremiumGrants();if(enabled)grants[email]=true;else delete grants[email];await savePremiumGrants();}res.json({ok:true,email:email,premium:enabled});});
 app.get("/api/history",async function(req,res){const session=await authSession(req);if(!session)return res.status(401).json({error:"לא מחובר"});if(!supabaseReady())return res.json({history:[]});try{const accountId=accountIdForUser(session.user),rows=await sb("analysis_history?select=id,title,artist,analysis,created_at&account_id=eq."+encodeURIComponent(accountId)+"&order=created_at.desc&limit=50");res.setHeader("Cache-Control","no-store");res.json({history:rows||[]});}catch(error){console.error(error);res.status(503).json({error:"לא ניתן לטעון היסטוריית ניתוחים"});}});
 app.post("/api/auth/logout",async function(req,res){const token=cookieToken(req);if(token){sessions.delete(token);if(supabaseReady())try{await sb("auth_sessions?token_hash=eq."+tokenHash(token),"DELETE");}catch(e){console.error("Session revoke failed",String(e.message||e));}}clearSessionCookie(res);res.json({ok:true});});
-app.post("/api/premium/checkout",async function(req,res){const session=await authSession(req);if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני רכישת Premium."});const accountId=accountIdForUser(session.user);if(await isPremiumSession(session))return res.json({alreadyPremium:true});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions","POST",{mode:"payment",locale:"he",success_url:APP_URL+"/?premium=success&session_id={CHECKOUT_SESSION_ID}",cancel_url:APP_URL+"/?premium=cancel",customer_email:normalizeEmail(session.user.email),client_reference_id:accountId,"line_items[0][price_data][currency]":PREMIUM_CURRENCY,"line_items[0][price_data][product_data][name]":PREMIUM_PRODUCT_NAME,"line_items[0][price_data][product_data][description]":"גישה מלאה ל-Chord Studio, ללא מגבלת שירים יומית ועם הפרדת קול הזמר","line_items[0][price_data][unit_amount]":String(PREMIUM_AMOUNT),"line_items[0][quantity]":"1","metadata[chord_studio_premium]":"1","metadata[account_id]":accountId,"payment_intent_data[metadata][chord_studio_premium]":"1","payment_intent_data[metadata][account_id]":accountId});if(!checkout||!checkout.url)throw new Error("Stripe לא החזיר קישור לתשלום.");res.json({url:checkout.url});}catch(error){console.error("Stripe checkout failed",String(error&&error.stack||error));res.status(502).json({error:"יצירת התשלום נכשלה: "+String(error&&error.message||error).slice(0,250)});}});
+let premiumOfferCache=null;
+let premiumOfferCacheAt=0;
+async function getPremiumSalesCount(){
+ if(!process.env.STRIPE_SECRET_KEY)return 0;
+ try{
+   const data=await stripeRequest("/v1/payment_intents/search","GET",{query:'metadata["chord_studio_premium"]:"1" AND status:"succeeded" AND currency:"'+PREMIUM_CURRENCY+'"',limit:String(PREMIUM_INTRO_SLOTS)});
+   return Math.min(PREMIUM_INTRO_SLOTS,Array.isArray(data&&data.data)?data.data.length:0);
+ }catch(error){
+   console.error("Premium sales count failed",String(error&&error.message||error));
+   return 0;
+ }
+}
+async function getPremiumOffer(){
+ const now=Date.now();
+ if(premiumOfferCache&&now-premiumOfferCacheAt<15000)return premiumOfferCache;
+ const sales=await getPremiumSalesCount();
+ const introRemaining=Math.max(0,PREMIUM_INTRO_SLOTS-sales);
+ premiumOfferCache={sold:sales,introRemaining:introRemaining,priceAmount:introRemaining>0?PREMIUM_INTRO_AMOUNT:PREMIUM_STANDARD_AMOUNT,priceAfterAmount:PREMIUM_STANDARD_AMOUNT};
+ premiumOfferCacheAt=now;
+ return premiumOfferCache;
+}
+app.get("/api/premium/info",async function(_req,res){
+ try{
+   const offer=await getPremiumOffer();
+   res.setHeader("Cache-Control","no-store");
+   res.json({configured:Boolean(process.env.STRIPE_SECRET_KEY),sold:offer.sold,introRemaining:offer.introRemaining,priceAmount:offer.priceAmount,priceText:(offer.priceAmount/100).toFixed(0)+" ₪",standardPriceAmount:PREMIUM_STANDARD_AMOUNT,standardPriceText:(PREMIUM_STANDARD_AMOUNT/100).toFixed(0)+" ₪",introSlots:PREMIUM_INTRO_SLOTS,lifetime:true});
+ }catch(error){
+   res.status(503).json({configured:false,error:"לא ניתן לטעון את מחיר Premium כרגע"});
+ }
+});
+app.post("/api/premium/checkout",async function(req,res){
+ const session=await authSession(req);
+ if(!session)return res.status(401).json({error:"יש להתחבר לחשבון לפני רכישת Premium."});
+ const accountId=accountIdForUser(session.user);
+ if(await isPremiumSession(session))return res.json({alreadyPremium:true});
+ if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});
+ try{
+   const offer=await getPremiumOffer();
+   const amount=offer.priceAmount;
+   const checkout=await stripeRequest("/v1/checkout/sessions","POST",{
+     mode:"payment",locale:"he",
+     success_url:APP_URL+"/?premium=success&session_id={CHECKOUT_SESSION_ID}",
+     cancel_url:APP_URL+"/?premium=cancel",
+     customer_email:normalizeEmail(session.user.email),
+     client_reference_id:accountId,
+     "line_items[0][price_data][currency]":PREMIUM_CURRENCY,
+     "line_items[0][price_data][product_data][name]":PREMIUM_PRODUCT_NAME,
+     "line_items[0][price_data][product_data][description]":"Premium חד־פעמי לכל החיים / עד שהאתר ייסגר. 5 הראשונים במחיר השקה, לאחר מכן המחיר עולה.",
+     "line_items[0][price_data][unit_amount]":String(amount),
+     "line_items[0][quantity]":"1",
+     "metadata[chord_studio_premium]":"1",
+     "metadata[account_id]":accountId,
+     "metadata[premium_intro_slot]":offer.introRemaining>0?"1":"0",
+     "payment_intent_data[metadata][chord_studio_premium]":"1",
+     "payment_intent_data[metadata][account_id]":accountId,
+     "payment_intent_data[metadata][premium_intro_slot]":offer.introRemaining>0?"1":"0"
+   });
+   if(!checkout||!checkout.url)throw new Error("Stripe לא החזיר קישור לתשלום.");
+   res.json({url:checkout.url,amount:amount,priceText:(amount/100).toFixed(0)+" ₪",introRemaining:offer.introRemaining});
+ }catch(error){
+   console.error("Stripe checkout failed",String(error&&error.stack||error));
+   res.status(502).json({error:"יצירת התשלום נכשלה: "+String(error&&error.message||error).slice(0,250)});
+ }
+});
 app.get("/api/premium/confirm",async function(req,res){const session=await authSession(req),sessionId=String(req.query.session_id||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני אישור התשלום."});if(!sessionId)return res.status(400).json({error:"חסר מזהה תשלום."});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions/"+encodeURIComponent(sessionId),"GET");const accountId=accountIdForUser(session.user),paid=checkout&&checkout.status==="complete"&&checkout.payment_status==="paid"&&Number(checkout.amount_total)===PREMIUM_AMOUNT&&String(checkout.currency||"").toLowerCase()===PREMIUM_CURRENCY&&checkout.metadata&&checkout.metadata.account_id===accountId&&checkout.metadata.chord_studio_premium==="1";if(!paid)return res.status(403).json({error:"התשלום לא אומת עבור חשבון Google הזה."});session.premium=true;session.premiumCheckedAt=Date.now();res.json({ok:true,premium:true});}catch(error){console.error("Stripe payment confirmation failed",String(error&&error.stack||error));res.status(502).json({error:"אימות התשלום נכשל: "+String(error&&error.message||error).slice(0,250)});}});
 async function requireUploadAccess(req,res,options){
  const session=await authSession(req);
@@ -412,9 +519,9 @@ async function requireUploadAccess(req,res,options){
  const premium=await isPremiumSession(session);
  if(options&&options.premiumRequired&&!premium){res.status(403).json({error:"הפעולה זמינה במסלול Premium בלבד."});return false;}
  let usageReservation=null;
- if(!premium&&!(options&&options.validateGeminiKey===false)){const usage=await reserveDailyUsage(accountIdForUser(session.user));if(!usage.allowed){const resetAt=nextDailyReset().toISOString();res.set("Retry-After",String(Math.max(1,Math.ceil((new Date(resetAt).getTime()-Date.now())/1000))));res.status(429).json({error:usage.reason==="pending"?"כבר מתבצע ניתוח עבור החשבון הזה. המתן לסיומו.":"המכסה היומית נוצלה. אפשר לנתח שיר נוסף כשהמכסה תתחדש.",dailyRemaining:0,dailyResetAt:resetAt});return false;}usageReservation=usage;}
+ if(!premium&&!(options&&options.validateGeminiKey===false)){const usage=await reserveDailyUsage(accountIdForUser(session.user));if(!usage.allowed){const resetAt=nextDailyReset().toISOString();res.set("Retry-After",String(Math.max(1,Math.ceil((new Date(resetAt).getTime()-Date.now())/1000))));res.status(429).json({error:usage.reason==="pending"?"כבר מתבצע ניתוח עבור החשבון הזה. המתן לסיומו.":"המכסה השבועית נוצלה. אפשר לנתח שיר נוסף כשהמכסה תתחדש.",weeklyRemaining:0,dailyRemaining:0,weeklyResetAt:resetAt,dailyResetAt:resetAt});return false;}usageReservation=usage;}
  req.auth={session:session,apiKey:apiKey,premium:premium,usageReservation:usageReservation};
- logOperation(req.operationId,"access_granted",premium?"חשבון Premium ומפתח API אומתו":"חשבון ומפתח API אומתו; נשמר מקום במכסה היומית","success");
+ logOperation(req.operationId,"access_granted",premium?"חשבון Premium ומפתח API אומתו":"חשבון ומפתח API אומתו; נשמר מקום במכסה השבועית","success");
  return true;
 }
 
@@ -672,15 +779,15 @@ app.post("/api/analyze",async function(req,res){
     currentStage="quota_commit";
     let quotaStatus=null;
     if(usageReservation){
-      logOperation(req.operationId,"quota_commit_started","מעדכנים את ניצול המכסה היומית לאחר ניתוח שהושלם");
+      logOperation(req.operationId,"quota_commit_started","מעדכנים את ניצול המכסה השבועית לאחר ניתוח שהושלם");
       await commitDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.date,usageReservation.reservationKey);
-      logOperation(req.operationId,"quota_commit_completed","המכסה היומית עודכנה");
+      logOperation(req.operationId,"quota_commit_completed","המכסה השבועית עודכנה");
       if(!req.auth.premium) quotaStatus=await getDailyUsage(accountIdForUser(req.auth.session.user));
     }
 
     currentStage="response";
     logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה סופית לדפדפן; משך כולל "+(Date.now()-startedAt)+"ms","success");
-    res.json({analysis:finalAnalysis,verificationAvailable:true,operationId:req.operationId,dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null});
+    res.json({analysis:finalAnalysis,verificationAvailable:true,operationId:req.operationId,dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null,weeklyRemaining:quotaStatus?quotaStatus.remaining:null,weeklyResetAt:quotaStatus?quotaStatus.resetAt:null});
    }catch(error){
     if(usageReservation)await releaseDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.reservationKey);
     let detail=String(error&&error.message||error);
