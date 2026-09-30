@@ -20,7 +20,7 @@ SONIC_ANNOTATOR_BIN = os.getenv("SONIC_ANNOTATOR_BIN", "/usr/local/bin/sonic-ann
 VAMP_PATH = os.getenv("VAMP_PATH", "/opt/vamp")
 CHORDINO_TRANSFORM = os.getenv(
     "CHORDINO_TRANSFORM",
-    "vamp:nnls-chroma:chordino:chord",
+    "vamp:nnls-chroma:chordino:simplechord",
 )
 CHORDINO_TIMEOUT_SECONDS = max(
     30, int(os.getenv("CHORDINO_TIMEOUT_SECONDS", "180"))
