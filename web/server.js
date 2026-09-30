@@ -433,28 +433,33 @@ function collapseAdjacentChordEvents(chords, maxGapSeconds) {
 }
 
 function quantizeChordsToFourBeats(chords, bpm, duration) {
-  const tempo = Number(bpm);
+  const rawTempo = Number(bpm);
+  const tempo = Number.isFinite(rawTempo) && rawTempo >= 40 && rawTempo <= 240 ? rawTempo : 120;
   const total = Number(duration);
-  if (!Number.isFinite(tempo) || tempo < 40 || tempo > 240 || !Number.isFinite(total) || total <= 0) return chords;
+  if (!Number.isFinite(total) || total <= 0) return [];
   const barSeconds = 4 * 60 / tempo;
-  const events = collapseAdjacentChordEvents(chords, 0.08);
+  const events = collapseAdjacentChordEvents(Array.isArray(chords) ? chords : [], 0.08);
   const bars = [];
   for (let start = 0; start < total; start += barSeconds) {
     const end = Math.min(total, start + barSeconds);
     const weights = new Map();
     for (const event of events) {
-      const overlap = Math.max(0, Math.min(end, event.end) - Math.max(start, event.start));
+      const overlap = Math.max(0, Math.min(end, Number(event.end) || 0) - Math.max(start, Number(event.start) || 0));
       if (overlap > 0) weights.set(event.chord, (weights.get(event.chord) || 0) + overlap);
     }
     if (!weights.size) continue;
-    let selected = "", selectedWeight = 0;
+    let selected = "";
+    let selectedWeight = -1;
     for (const [chord, weight] of weights) {
       if (weight > selectedWeight) { selected = chord; selectedWeight = weight; }
     }
     if (!selected) continue;
     const previous = bars[bars.length - 1];
-    if (previous && previous.chord === selected) previous.end = end;
-    else bars.push({ start: start, end: end, chord: selected, confidence: 0.8 });
+    if (previous && previous.chord === selected && Math.abs(previous.end - start) < 0.001) {
+      previous.end = end;
+    } else {
+      bars.push({ start, end, chord: selected, confidence: 0.8 });
+    }
   }
   return bars;
 }
