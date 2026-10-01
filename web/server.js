@@ -319,7 +319,7 @@ function filenameHint(filename) {
 const SONG_NOISE_WORDS=new Set(["official","video","music","audio","lyrics","lyric","visualizer","remix","version","edit","live","cover","קליפ","רשמי","מילים","אודיו","וידאו","הופעה","לייב","קאבר","גרסה","רמיקס","מיקס","סינגל"]);
 function compactSongText(value,stripNoise){
   let s=String(value||"").normalize("NFKC").toLowerCase().replace(/[’'״׳]/g,"");
-  s=s.replace(/.(mp3|wav|m4a|flac|ogg|aac|opus)$/i," ").replace(/[()[\]{}]/g," ").replace(/[._]+/g," ").replace(/\b(?:track|trk|song)\s*\d+\b/gi," ").replace(/^\s*\d{1,3}\s*[-.)_]+\s*/u," ");
+  s=s.replace(/\.(mp3|wav|m4a|flac|ogg|aac|opus)$/i," ").replace(/[()[\]{}]/g," ").replace(/[._]+/g," ").replace(/\b(?:track|trk|song)\s*\d+\b/gi," ").replace(/^\s*\d{1,3}\s*[-.)_]+\s*/u," ");
   const fm={"ך":"כ","ם":"מ","ן":"נ","ף":"פ","ץ":"צ"};s=Array.from(s).map(ch=>fm[ch]||ch).join("");
   let t=s.match(/[\p{L}\p{N}]+/gu)||[];if(stripNoise)t=t.filter(x=>!SONG_NOISE_WORDS.has(x));return t.join("");
 }
@@ -333,8 +333,8 @@ function songSimilarity(a,b){
 function songIdentityKey(title,artist){return [compactSongText(title,false),compactSongText(artist,false)].filter(Boolean).sort().join("|");}
 function songCandidates(filename,meta){
   const out=[],seen=new Set(),add=(title,artist,source)=>{title=String(title||"").trim();artist=String(artist||"").trim();if(!title&&!artist)return;const k=source+"|"+compactSongText(title,true)+"|"+compactSongText(artist,true);if(seen.has(k))return;seen.add(k);out.push({title,artist,source});};
-  const mt=String(meta&&meta.title||"").trim(),ma=String(meta&&(meta.artist||meta.albumArtist)||"").trim();if(mt||ma)add(mt,ma,"tags");
-  const stem=filenameHint(filename).replace(/.(mp3|wav|m4a|flac|ogg|aac|opus)$/i,"");
+  const mt=String(meta&&meta.title||"").trim(),ma=String(meta&&(meta.artist||meta.albumArtist)||"").trim();if(mt||ma){add(mt,ma,"tags");if(mt&&ma)add(ma,mt,"tags");}
+  const stem=filenameHint(filename).replace(/\.(mp3|wav|m4a|flac|ogg|aac|opus)$/i,"");
   const parts=stem.split(/\s+(?:-|–|—|\|)\s+|\s*\|\s*/u).map(x=>String(x||"").trim()).filter(Boolean);
   if(parts.length>=2){const a=parts[0],b=parts.slice(1).join(" ");add(b,a,"filename");add(a,b,"filename");}
   const cleaned=parts.join(" ").trim();if(cleaned)add(cleaned,"","filename");
