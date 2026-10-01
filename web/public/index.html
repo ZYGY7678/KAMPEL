@@ -133,7 +133,7 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 .home-layout>.home-main{display:block!important;width:100%!important;min-width:0!important;visibility:visible!important;opacity:1!important}
 #home{display:block}
 #home.hidden{display:none!important}
-</style>
+.scroll-speed-control{display:flex;align-items:center;gap:9px;min-width:130px}.scroll-speed-control input{width:100%;min-width:85px;accent-color:var(--ui-accent,#67d8d2)}.scroll-speed-control b{min-width:30px;color:var(--ui-accent,#67d8d2);font:700 12px "Space Grotesk"}</style>
 <style>
 .developer-message-modal{position:fixed;inset:0;z-index:220;display:grid;place-items:center;padding:16px;background:rgba(3,12,22,.76);backdrop-filter:blur(10px)}
 .developer-message-dialog{width:min(620px,100%);max-height:min(90vh,820px);overflow:auto;padding:24px;border-radius:22px;background:#0b1d31;border:1px solid rgba(120,190,220,.22);box-shadow:0 28px 100px #0009}
@@ -294,7 +294,7 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 <div class="tool"><label>שינוי טון</label><div class="step"><button onclick="shiftTone(-1)">−</button><b id="shiftValue">0</b><button onclick="shiftTone(1)">＋</button></div><div id="presets" class="presets"></div></div>
 <div class="tool"><label>פישוט אקורדים</label><div class="segment"><button data-mode="off" onclick="setSimplify('off')">מקורי</button><button data-mode="simple" onclick="setSimplify('simple')">פשוט</button><button data-mode="medium" onclick="setSimplify('medium')">בינוני</button><button data-mode="advanced" onclick="setSimplify('advanced')">מתקדם</button></div></div>
 <div class="tool easy-version-tool"><label>גרסה קלה</label><button id="easyVersionBtn" class="easy-version-btn" type="button" onclick="applyEasyVersion()">✨ העבר לטון הקל ביותר</button><span id="easyVersionInfo" class="easy-version-info"></span></div>
-<div class="tool word-tool"><label>גודל כתב באתר וב־Word/PDF</label><select id="wordFontSize" class="font-size-select" aria-label="גודל כתב באתר ובקובץ"><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="14" selected>14</option><option value="16">16</option><option value="18">18</option><option value="20">20</option><option value="22">22</option><option value="24">24</option><option value="26">26</option><option value="28">28</option><option value="30">30</option><option value="32">32</option><option value="36">36</option></select></div>
+<div class="tool"><label for="lyricsScrollSpeed">מהירות גלילה</label><div class="scroll-speed-control"><input id="lyricsScrollSpeed" type="range" min="0.5" max="2.5" step="0.25" value="1" oninput="setLyricsScrollSpeed(this.value)"><b id="lyricsScrollSpeedValue">1×</b></div></div><div class="tool word-tool"><label>גודל כתב באתר וב־Word/PDF</label><select id="wordFontSize" class="font-size-select" aria-label="גודל כתב באתר ובקובץ"><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="14" selected>14</option><option value="16">16</option><option value="18">18</option><option value="20">20</option><option value="22">22</option><option value="24">24</option><option value="26">26</option><option value="28">28</option><option value="30">30</option><option value="32">32</option><option value="36">36</option></select></div>
 </section>
 
 <section id="verificationPanel" class="card toolbar"><div class="tool"><strong id="verificationStatus">הניתוח הראשוני מוכן</strong><p>אפשר לעבוד עם השיר עכשיו, ולהפעיל אימות נוסף בנפרד</p></div><div class="tool"><button id="verifyBtn" class="primary" onclick="verifyAnalysis()">בדוק ואמת אקורדים ומילים</button></div></section>
@@ -607,6 +607,7 @@ var playbackMode = "original";
 var separationBusy = false;
 var analysis = null;
 var currentOperationId = "";
+var lyricsScrollSpeed=1;
 var shift = 0;
 var simplifyMode = "simple";
 var progressTimer = null;
@@ -788,6 +789,7 @@ function lyricsScrollTargetY(target){
  var rect=target.getBoundingClientRect(),vh=window.innerHeight||document.documentElement.clientHeight||800,header=document.querySelector(".top"),headerH=header?header.getBoundingClientRect().height:0;
  return Math.max(0,window.scrollY+rect.top+rect.height/2-Math.max(headerH+24,vh*0.38));
 }
+function setLyricsScrollSpeed(value){var n=Number(value);lyricsScrollSpeed=Math.max(0.5,Math.min(2.5,Number.isFinite(n)?n:1));var label=document.getElementById("lyricsScrollSpeedValue");if(label)label.textContent=lyricsScrollSpeed.toFixed(2).replace(/0+$/,"").replace(/\\.$/,"")+"×";var body=document.getElementById("lyricsBody");if(body)body._uniformScroll=null;}
 function updateLyricsAutoScroll(t){
  var body=document.getElementById("lyricsBody");
  if(!body||!analysis||isLyricsAutoScrollBlocked(body))return;
@@ -800,11 +802,11 @@ function updateLyricsAutoScroll(t){
  var endY=docMax;
  if(!metrics){
    var progress=Math.max(0,Math.min(1,t/duration));
-   var natural=startY+(endY-startY)*progress;
+   var natural=startY+(endY-startY)*Math.pow(progress,1/lyricsScrollSpeed);
    metrics=body._uniformScroll={startY:startY,endY:endY,duration:duration,offset:window.scrollY-natural};
  }
  var progress=Math.max(0,Math.min(1,t/metrics.duration));
- var y=metrics.startY+(metrics.endY-metrics.startY)*progress+metrics.offset;
+ var y=metrics.startY+(metrics.endY-metrics.startY)*Math.pow(progress,1/lyricsScrollSpeed)+metrics.offset;
  y=Math.max(0,Math.min(docMax,y));
  document.documentElement.scrollTop=y;
  document.body.scrollTop=y;
