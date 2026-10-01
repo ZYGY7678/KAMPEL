@@ -221,8 +221,8 @@ const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const LOCAL_AUDIO_ENGINE_URL = String(process.env.LOCAL_AUDIO_ENGINE_URL || "").replace(/\/+$/, "");
 const LOCAL_AUDIO_ENGINE_TOKEN = String(process.env.LOCAL_AUDIO_ENGINE_TOKEN || "");
 const CHORDINO_ENGINE_TIMEOUT_MS = Math.max(30000, Number(process.env.CHORDINO_ENGINE_TIMEOUT_MS) || 240000);
-const CHORDINO_CHUNK_SECONDS = Math.max(30, Math.min(90, Number(process.env.CHORDINO_CHUNK_SECONDS) || 60));
-const CHORDINO_CHUNK_OVERLAP_SECONDS = Math.max(2, Math.min(8, Number(process.env.CHORDINO_CHUNK_OVERLAP_SECONDS) || 4));
+const CHORDINO_CHUNK_SECONDS = Math.max(20, Math.min(20, Number(process.env.CHORDINO_CHUNK_SECONDS) || 20));
+const CHORDINO_CHUNK_OVERLAP_SECONDS = Math.max(4, Math.min(5, Number(process.env.CHORDINO_CHUNK_OVERLAP_SECONDS) || 5));
 const CHORDINO_CHUNK_SAMPLE_RATE = Math.max(16000, Math.min(48000, Number(process.env.CHORDINO_CHUNK_SAMPLE_RATE) || 44100));
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 const SONG_STORAGE_BUCKET = "chord-studio-songs";
@@ -975,7 +975,7 @@ async function analyzeChordinoInChunks(filePath,originalName,mimeType,operationI
   }
 
   const merged=[];
-  logOperation(operationIdValue,"chordino_chunking_started","האודיו חולק ל-"+chunkPlans.length+" מקטעים של "+CHORDINO_CHUNK_SECONDS+" שניות עם חפיפה של "+CHORDINO_CHUNK_OVERLAP_SECONDS+" שניות לסנכרון");
+  logOperation(operationIdValue,"chordino_chunking_started","האודיו חולק לליבות של "+CHORDINO_CHUNK_SECONDS+" שניות עם חפיפה של "+CHORDINO_CHUNK_OVERLAP_SECONDS+" שניות; כל מקטע ממופה מחדש לציר הזמן המקורי לפני האיחוד");
 
   for(const plan of chunkPlans){
     const chunkPath=path.join(uploadDir,"chordino-"+operationIdValue+"-"+plan.index+"-"+crypto.randomBytes(5).toString("hex")+".wav");
