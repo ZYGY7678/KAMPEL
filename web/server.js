@@ -984,11 +984,12 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
   const timeout=setTimeout(function(){controller.abort();},CHORDINO_ENGINE_TIMEOUT_MS);
   try{
     logOperation(operationIdValue,"chordino_started","שולחים את האודיו למנוע Sonic Annotator + Chordino");
-    const bytes=await fs.readFile(filePath),form=new FormData();
-    form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
+    const bytes=await fs.readFile(filePath);
     let response,connectionError;
     for(let attempt=0;attempt<3;attempt++){
       try{
+        const form=new FormData();
+        form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
         response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
           method:"POST",
           headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
@@ -996,6 +997,12 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
           signal:controller.signal
         });
         connectionError=null;
+        if([502,503,504].includes(response.status)&&attempt<2){
+          logOperation(operationIdValue,"chordino_http_retry","שירות Chordino החזיר HTTP "+response.status+"; ניסיון חוזר "+(attempt+2)+" מתוך 3","warning");
+          try{await response.body?.cancel();}catch(cancelError){}
+          await new Promise(function(resolve){setTimeout(resolve,2000*(attempt+1));});
+          continue;
+        }
         break;
       }catch(error){
         connectionError=error;
