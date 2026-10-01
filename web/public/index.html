@@ -857,7 +857,7 @@ function validateAuthForm(){
   var email=String(document.getElementById("authEmail").value||"").trim();
   var password=String(document.getElementById("authPassword").value||"");
   var name=String(document.getElementById("authName").value||"").trim();
-  if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return "הזן כתובת אימייל תקינה";
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return "הזן כתובת אימייל תקינה";
   if(!password)return "יש להזין סיסמה";
   if(password.length<8)return "הסיסמה חייבת להכיל לפחות 8 תווים";
   if(password.length>200)return "הסיסמה ארוכה מדי";
