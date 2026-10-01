@@ -1172,6 +1172,7 @@ app.post("/api/verify/:id",async function(req,res){
  try{
    const verifyPrompt=VERIFY_PREFIX+metadataPromptBlock(pending.filename,pending.audioMetadata)+"\nCandidate JSON:\n"+JSON.stringify(pending.first);
    const verified=cleanAnalysis(await analyzeWithGemini(apiKey,pending.audioBase64,pending.mimeType,verifyPrompt,id,"analysis_verify"));
+   alignFinalWordTimes(verified.lines,pending.transcriptionWords||[],Number(verified.duration)||0);
    if(supabaseReady()&&pending.historyId)await updateAnalysisHistory(pending.historyId,accountIdForUser(session.user),verified);
    pendingVerifications.delete(id);res.json({analysis:verified,verified:true});
  }catch(error){res.status(502).json({error:"האימות הנוסף נכשל, אך הניתוח הראשוני נשמר. "+String(error&&error.message||error),verificationFailed:true});}
