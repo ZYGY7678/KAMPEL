@@ -198,16 +198,11 @@ function normalizedHttpUrl(raw){
  try{const u=new URL(String(raw||"").trim());if(u.protocol!=="http:"&&u.protocol!=="https:")return "";u.hash="";return u.href;}catch{return "";}
 }
 async function saveAnalysisHistory(accountId,analysis,meta){
- const payload={account_id:accountId,title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis,
-  audio_path:meta&&meta.audioPath?String(meta.audioPath):null,
-  original_filename:meta&&meta.originalFilename?String(meta.originalFilename):null,
-  mime_type:meta&&meta.mimeType?String(meta.mimeType):null,
-  file_size:meta&&Number.isFinite(Number(meta.fileSize))?Number(meta.fileSize):null};
- const rows=await sb("analysis_history","POST",payload);
- const row=Array.isArray(rows)?rows[0]:rows;
- return row&&row.id?String(row.id):"";
+ const title=String(analysis&&analysis.title||"").trim(),artist=String(analysis&&analysis.artist||"").trim(),durationMs=Number(meta&&meta.durationMs)>0?Math.round(Number(meta.durationMs)):(Number(analysis&&analysis.duration)>0?Math.round(Number(analysis.duration)*1000):null);
+ const payload={account_id:accountId,title:title,artist:artist,analysis:analysis,audio_path:meta&&meta.audioPath?String(meta.audioPath):null,original_filename:meta&&meta.originalFilename?String(meta.originalFilename):null,mime_type:meta&&meta.mimeType?String(meta.mimeType):null,file_size:meta&&Number.isFinite(Number(meta.fileSize))?Number(meta.fileSize):null,audio_sha256:meta&&meta.audioSha256?String(meta.audioSha256):null,duration_ms:durationMs,normalized_title:compactSongText(title,false)||null,normalized_artist:compactSongText(artist,false)||null,identity_key:songIdentityKey(title,artist)||null};
+ const rows=await sb("analysis_history","POST",payload),row=Array.isArray(rows)?rows[0]:rows;return row&&row.id?String(row.id):"";
 }
-async function updateAnalysisHistory(id,accountId,analysis){if(!id)return;await sb("analysis_history?id=eq."+encodeURIComponent(id)+"&account_id=eq."+encodeURIComponent(accountId),"PATCH",{title:String(analysis&&analysis.title||""),artist:String(analysis&&analysis.artist||""),analysis:analysis});}
+async function updateAnalysisHistory(id,accountId,analysis){if(!id)return;const clean=cleanAnalysis(analysis),title=String(clean&&clean.title||"").trim(),artist=String(clean&&clean.artist||"").trim();await sb("analysis_history?id=eq."+encodeURIComponent(id)+"&account_id=eq."+encodeURIComponent(accountId),"PATCH",{title:title,artist:artist,analysis:clean,duration_ms:Number(clean&&clean.duration)>0?Math.round(Number(clean.duration)*1000):null,normalized_title:compactSongText(title,false)||null,normalized_artist:compactSongText(artist,false)||null,identity_key:songIdentityKey(title,artist)||null});}
 async function stripeRequest(endpoint,method,params){if(!process.env.STRIPE_SECRET_KEY){const e=new Error("Stripe עדיין לא הוגדר בשרת.");e.code="STRIPE_NOT_CONFIGURED";throw e;}let url="https://api.stripe.com"+endpoint;const headers={Authorization:"Bearer "+process.env.STRIPE_SECRET_KEY};let body;if(method==="GET"){const q=params?new URLSearchParams(params).toString():"";if(q)url+="?"+q;}else if(params){headers["Content-Type"]="application/x-www-form-urlencoded";body=new URLSearchParams(params).toString();}const resp=await fetch(url,{method:method||"GET",headers:headers,body:body}),raw=await resp.text();let data=null;try{data=raw?JSON.parse(raw):null;}catch{}if(!resp.ok){const e=new Error(data&&data.error&&data.error.message||"Stripe request failed");e.stripeStatus=resp.status;throw e;}return data;}
 async function stripeHasPaidPremium(id){if(!process.env.STRIPE_SECRET_KEY)return false;const safe=String(id).replace(/"/g,'\"'),query='metadata["chord_studio_premium"]:"1" AND metadata["account_id"]:"'+safe+'" AND status:"succeeded" AND currency:"'+PREMIUM_CURRENCY+'" AND amount:'+PREMIUM_AMOUNT,data=await stripeRequest("/v1/payment_intents/search","GET",{query:query,limit:"1"});return Boolean(data&&Array.isArray(data.data)&&data.data.some(function(item){return item&&item.status==="succeeded"&&Number(item.amount)===PREMIUM_AMOUNT&&String(item.currency||"").toLowerCase()===PREMIUM_CURRENCY&&item.metadata&&item.metadata.chord_studio_premium==="1"&&item.metadata.account_id===id;}));}
 async function isPremiumSession(session){if(!session)return false;if(session.premium===true)return true;const grants=await loadPremiumGrants();if(grants[normalizeEmail(session.user.email)]===true)return true;if(!process.env.STRIPE_SECRET_KEY)return false;if(session.premiumCheckedAt&&Date.now()-session.premiumCheckedAt<30000)return Boolean(session.premium);try{session.premium=await stripeHasPaidPremium(accountIdForUser(session.user));}catch(e){console.error("Stripe premium check failed",String(e&&e.message||e));session.premium=false;}session.premiumCheckedAt=Date.now();return Boolean(session.premium);}
@@ -321,6 +316,58 @@ function filenameHint(filename) {
   return path.basename(String(filename || "")).trim();
 }
 
+const SONG_NOISE_WORDS=new Set(["official","video","music","audio","lyrics","lyric","visualizer","remix","version","edit","live","cover","קליפ","רשמי","מילים","אודיו","וידאו","הופעה","לייב","קאבר","גרסה","רמיקס","מיקס","סינגל"]);
+function compactSongText(value,stripNoise){
+  let s=String(value||"").normalize("NFKC").toLowerCase().replace(/[’'״׳]/g,"");
+  s=s.replace(/.(mp3|wav|m4a|flac|ogg|aac|opus)$/i," ").replace(/[()[\]{}]/g," ").replace(/[._]+/g," ").replace(/\b(?:track|trk|song)\s*\d+\b/gi," ").replace(/^\s*\d{1,3}\s*[-.)_]+\s*/u," ");
+  const fm={"ך":"כ","ם":"מ","ן":"נ","ף":"פ","ץ":"צ"};s=Array.from(s).map(ch=>fm[ch]||ch).join("");
+  let t=s.match(/[\p{L}\p{N}]+/gu)||[];if(stripNoise)t=t.filter(x=>!SONG_NOISE_WORDS.has(x));return t.join("");
+}
+function songSimilarity(a,b){
+  const aa=compactSongText(a,false),bb=compactSongText(b,false);if(!aa||!bb)return 0;if(aa===bb)return 1;
+  if(aa.includes(bb)||bb.includes(aa))return .9;
+  const prev=new Array(bb.length+1),cur=new Array(bb.length+1);for(let j=0;j<=bb.length;j++)prev[j]=j;
+  for(let i=1;i<=aa.length;i++){cur[0]=i;for(let j=1;j<=bb.length;j++){const cost=aa[i-1]===bb[j-1]?0:1;cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+cost)}for(let j=0;j<=bb.length;j++)prev[j]=cur[j]}
+  return 1-prev[bb.length]/Math.max(aa.length,bb.length);
+}
+function songIdentityKey(title,artist){return [compactSongText(title,false),compactSongText(artist,false)].filter(Boolean).sort().join("|");}
+function songCandidates(filename,meta){
+  const out=[],seen=new Set(),add=(title,artist,source)=>{title=String(title||"").trim();artist=String(artist||"").trim();if(!title&&!artist)return;const k=source+"|"+compactSongText(title,true)+"|"+compactSongText(artist,true);if(seen.has(k))return;seen.add(k);out.push({title,artist,source});};
+  const mt=String(meta&&meta.title||"").trim(),ma=String(meta&&(meta.artist||meta.albumArtist)||"").trim();if(mt||ma)add(mt,ma,"tags");
+  const stem=filenameHint(filename).replace(/.(mp3|wav|m4a|flac|ogg|aac|opus)$/i,"");
+  const parts=stem.split(/\s+(?:-|–|—|\|)\s+|\s*\|\s*/u).map(x=>String(x||"").trim()).filter(Boolean);
+  if(parts.length>=2){const a=parts[0],b=parts.slice(1).join(" ");add(b,a,"filename");add(a,b,"filename");}
+  const cleaned=parts.join(" ").trim();if(cleaned)add(cleaned,"","filename");
+  return out;
+}
+function scoreSongCandidate(input,row,duration){
+  const rt=String(row&&row.title||"").trim(),ra=String(row&&row.artist||"").trim();if(!rt&&!ra)return {score:0,method:""};
+  const it=String(input&&input.title||"").trim(),ia=String(input&&input.artist||"").trim(),ts=songSimilarity(it,rt),as=songSimilarity(ia,ra);
+  let score=0,method="";
+  if(it&&ia&&rt&&ra){score=ts*.74+as*.26;method=ts>=.9&&as>=.9?"התאמה לשם השיר ולאמן":"התאמה חכמה לשיר ולאמן";}
+  else if(it&&rt){score=ts*.94;method="התאמה לשם השיר";}
+  const rd=Number(row&&row.duration_ms)>0?Number(row.duration_ms)/1000:0;
+  if(duration>0&&rd>0){const d=Math.abs(duration-rd);if(d<=2)score+=.06;else if(d<=5)score+=.035;else if(d<=10)score+=.015;else if(d>=45)score-=.06;}
+  if(it&&ia&&songIdentityKey(it,ia)===songIdentityKey(rt,ra)){score=Math.max(score,.97);method="התאמה מלאה לשיר ולאמן, גם אם הסדר הוחלף";}
+  return {score:Math.max(0,Math.min(1,score)),method};
+}
+async function findReusableSongMatches(options){
+  if(!supabaseReady())return [];
+  const o=options||{},inputs=songCandidates(o.filename,o.audioMetadata||{}),duration=Number(o.durationSeconds)||0,hash=String(o.audioSha256||"");
+  const rows=[],add=page=>{for(const row of Array.isArray(page)?page:[])if(row&&row.id)rows.push(row)};
+  if(hash)add(await sb("analysis_history?select=id,title,artist,original_filename,audio_sha256,duration_ms,normalized_title,normalized_artist,identity_key,created_at&audio_sha256=eq."+encodeURIComponent(hash)+"&order=created_at.desc&limit=20"));
+  if(!rows.length){let offset=0;while(true){const page=await sb("analysis_history?select=id,title,artist,original_filename,audio_sha256,duration_ms,normalized_title,normalized_artist,identity_key,created_at&order=created_at.desc&limit=1000&offset="+offset);add(page);if(!Array.isArray(page)||page.length<1000)break;offset+=1000;}}
+  const matches=[];
+  for(const row of rows){
+    let best={score:0,method:""};
+    if(hash&&String(row.audio_sha256||"")===hash)best={score:1,method:"זהה לקובץ שכבר נותח"};
+    for(const input of inputs){const s=scoreSongCandidate(input,row,duration);if(s.score>best.score)best=s;}
+    if(best.score>=.86)matches.push({id:String(row.id),title:String(row.title||"").trim()||"שיר ללא שם",artist:String(row.artist||"").trim()||"אמן לא ידוע",duration:Number(row.duration_ms)>0?Number(row.duration_ms)/1000:0,score:best.score,method:best.method||"התאמה חכמה"});
+  }
+  matches.sort((a,b)=>b.score-a.score||Math.abs((a.duration||0)-duration)-Math.abs((b.duration||0)-duration));
+  return matches.slice(0,5);
+}
+
 async function extractAudioMetadata(filePath) {
   try {
     const metadata = await parseFile(filePath, { skipCovers: true });
@@ -331,7 +378,8 @@ async function extractAudioMetadata(filePath) {
       album: String(common.album || "").trim(),
       albumArtist: String(common.albumartist || "").trim(),
       track: common.track && common.track.no ? Number(common.track.no) : null,
-      year: common.year ? Number(common.year) : null
+      year: common.year ? Number(common.year) : null,
+      duration: Number(metadata && metadata.format && metadata.format.duration) > 0 ? Number(metadata.format.duration) : 0
     };
   } catch (error) {
     console.warn("Audio metadata read failed", String(error && error.message || error).slice(0, 250));
@@ -928,19 +976,13 @@ app.post("/api/premium/checkout",async function(req,res){
 });
 app.get("/api/premium/confirm",async function(req,res){const session=await authSession(req),sessionId=String(req.query.session_id||"").trim();if(!session)return res.status(401).json({error:"יש להתחבר עם Google לפני אישור התשלום."});if(!sessionId)return res.status(400).json({error:"חסר מזהה תשלום."});if(!process.env.STRIPE_SECRET_KEY)return res.status(503).json({error:"מערכת התשלום עדיין לא הוגדרה בשרת."});try{const checkout=await stripeRequest("/v1/checkout/sessions/"+encodeURIComponent(sessionId),"GET");const accountId=accountIdForUser(session.user),paid=checkout&&checkout.status==="complete"&&checkout.payment_status==="paid"&&Number(checkout.amount_total)===PREMIUM_AMOUNT&&String(checkout.currency||"").toLowerCase()===PREMIUM_CURRENCY&&checkout.metadata&&checkout.metadata.account_id===accountId&&checkout.metadata.chord_studio_premium==="1";if(!paid)return res.status(403).json({error:"התשלום לא אומת עבור חשבון Google הזה."});session.premium=true;session.premiumCheckedAt=Date.now();res.json({ok:true,premium:true});}catch(error){console.error("Stripe payment confirmation failed",String(error&&error.stack||error));res.status(502).json({error:"אימות התשלום נכשל: "+String(error&&error.message||error).slice(0,250)});}});
 async function requireUploadAccess(req,res,options){
- const session=await authSession(req);
- if(!session){res.status(401).json({error:"יש להתחבר עם חשבון לפני העלאת קובץ."});return false;}
- const apiKey=String(req.headers["x-gemini-api-key"]||"").trim();
- if(!apiKey){res.status(401).json({error:"חייבים להזין מפתח Gemini API לפני העלאת קובץ."});return false;}
- const premium=await isPremiumSession(session);
- if(options&&options.premiumRequired&&!premium){res.status(403).json({error:"הפעולה זמינה במסלול Premium בלבד."});return false;}
+ const session=await authSession(req);if(!session){res.status(401).json({error:"יש להתחבר עם חשבון לפני העלאת קובץ."});return false;}
+ const requireApiKey=!(options&&options.requireApiKey===false),apiKey=String(req.headers["x-gemini-api-key"]||"").trim();if(requireApiKey&&!apiKey){res.status(401).json({error:"חייבים להזין מפתח Gemini API לפני העלאת קובץ."});return false;}
+ const premium=await isPremiumSession(session);if(options&&options.premiumRequired&&!premium){res.status(403).json({error:"הפעולה זמינה במסלול Premium בלבד."});return false;}
  let usageReservation=null;
  if(!premium&&!(options&&options.validateGeminiKey===false)){const usage=await reserveDailyUsage(accountIdForUser(session.user));if(!usage.allowed){const resetAt=nextDailyReset().toISOString();res.set("Retry-After",String(Math.max(1,Math.ceil((new Date(resetAt).getTime()-Date.now())/1000))));res.status(429).json({error:usage.reason==="pending"?"כבר מתבצע ניתוח עבור החשבון הזה. המתן לסיומו.":"המכסה השבועית נוצלה. אפשר לנתח שיר נוסף כשהמכסה תתחדש.",weeklyRemaining:0,dailyRemaining:0,weeklyResetAt:resetAt,dailyResetAt:resetAt});return false;}usageReservation=usage;}
- req.auth={session:session,apiKey:apiKey,premium:premium,usageReservation:usageReservation};
- logOperation(req.operationId,"access_granted",premium?"חשבון Premium ומפתח API אומתו":"חשבון ומפתח API אומתו; נשמר מקום במכסה השבועית","success");
- return true;
+ req.auth={session:session,apiKey:apiKey,premium:premium,usageReservation:usageReservation};logOperation(req.operationId,"access_granted",premium?"חשבון Premium אומת":usageReservation?"חשבון ומפתח API אומתו; נשמר מקום במכסה השבועית":"החשבון אומת; עדיין לא נשמר מקום במכסת הניתוח","success");return true;
 }
-
 function parseTranscriptionOffset(value){
   if(typeof value==="number"&&Number.isFinite(value))return Math.max(0,value);
   const raw=String(value==null?"":value).trim().toLowerCase();
@@ -1243,8 +1285,8 @@ app.post("/api/analyze",async function(req,res){
  logOperation(req.operationId,"request_received","התקבלה בקשת ניתוח מהדפדפן");
  let currentStage="access_check";
  try{
-  const access=await requireUploadAccess(req,res,{consumeDaily:true,validateGeminiKey:true});
-  if(access!==true){logOperation(req.operationId,"access_denied","השרת עצר את הבקשה בשלב בדיקת הרשאות; HTTP "+res.statusCode,"error");return;}
+  const access=await requireUploadAccess(req,res,{consumeDaily:false,validateGeminiKey:false,requireApiKey:false});
+  if(access!==true){logOperation(req.operationId,"access_denied","השרת עצר את הבקשה בשלב בדיקת החשבון; HTTP "+res.statusCode,"error");return;}
   operationOwners.set(req.operationId,accountIdForUser(req.auth.session.user));
   currentStage="upload";
   logOperation(req.operationId,"upload_receiving","השרת התחיל לקבל את קובץ האודיו");
@@ -1280,6 +1322,25 @@ app.post("/api/analyze",async function(req,res){
     logOperation(req.operationId,"metadata_started","מחלצים פרטי אודיו כגון מידע מוטמע");
     const audioMetadata=await extractAudioMetadata(req.file.path);
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
+
+    const audioBufferForMatch=await fs.readFile(req.file.path);
+    const audioSha256ForMatch=crypto.createHash("sha256").update(audioBufferForMatch).digest("hex");
+    const skipGlobalReuse=String(req.body&&req.body.skipGlobalReuse||"") === "1";
+    if(!skipGlobalReuse){
+      currentStage="global_song_match";
+      logOperation(req.operationId,"song_match_search_started","מחפשים בכל הניתוחים הקיימים של כל המשתמשים לפני Gemini ו-Chordino");
+      const reusableMatches=await findReusableSongMatches({filename:filenameHintValue,audioMetadata:audioMetadata,audioSha256:audioSha256ForMatch,durationSeconds:Number(audioMetadata&&audioMetadata.duration)||0});
+      if(reusableMatches.length){
+        const match=reusableMatches[0];
+        logOperation(req.operationId,"song_match_found","נמצאה התאמה לשיר שכבר נותח: "+match.title+" — "+match.artist+"; "+match.method,"success");
+        res.setHeader("Cache-Control","no-store");
+        return res.json({match:{id:match.id,title:match.title,artist:match.artist,duration:match.duration,method:match.method},operationId:req.operationId});
+      }
+      logOperation(req.operationId,"song_match_none","לא נמצאה התאמה מספקת; ממשיכים לניתוח מלא");
+    }
+    currentStage="access_check";
+    const finalAccess=await requireUploadAccess(req,res,{consumeDaily:true,validateGeminiKey:true,requireApiKey:true});
+    if(finalAccess!==true){logOperation(req.operationId,"access_denied","השרת עצר את הבקשה לאחר חיפוש ההתאמה; HTTP "+res.statusCode,"error");return;}
 
     currentStage="evidence_collection";
     logOperation(req.operationId,"evidence_collection_started","מריצים תמלול Gemini מלא ובמקביל Chordino על כל השיר בבקשה אחת, ללא חלוקה למקטעים");
@@ -1341,7 +1402,7 @@ app.post("/api/analyze",async function(req,res){
       }
       logOperation(req.operationId,"history_save_started","שומרים את הניתוח ואת פרטי השיר בהיסטוריית החשבון");
       try{
-        historyId=await saveAnalysisHistory(accountId,finalAnalysis,{audioPath:savedAudioPath,originalFilename:req.file.originalname||filenameHintValue,mimeType:req.file.mimetype||mimeType,fileSize:stat.size});
+        historyId=await saveAnalysisHistory(accountId,finalAnalysis,{audioPath:savedAudioPath,originalFilename:req.file.originalname||filenameHintValue,mimeType:req.file.mimetype||mimeType,fileSize:stat.size ,audioSha256:audioSha256ForMatch,durationMs:Number(finalAnalysis.duration)>0?Math.round(Number(finalAnalysis.duration)*1000):Math.round(Number(audioMetadata.duration||0)*1000)});
       }catch(historyError){
         if(savedAudioPath)await deleteSongFromStorage(savedAudioPath);
         throw historyError;
@@ -1381,6 +1442,24 @@ app.post("/api/analyze",async function(req,res){
   logOperation(req.operationId,"failed","כשל לפני עיבוד הקובץ בשלב "+currentStage+"; HTTP 500; פירוט: "+detail.slice(0,500),"error");
   if(!res.headersSent)res.status(500).json({error:"Gemini: "+(detail||"שגיאת שרת"),operationId:req.operationId,stage:currentStage});
  }
+});
+
+app.post("/api/reuse-analysis",upload.single("audio"),async function(req,res){
+ const session=await authSession(req);if(!session)return res.status(401).json({error:"יש להתחבר עם חשבון לפני שימוש בשיר שכבר נותח."});
+ const historyId=String(req.body&&req.body.historyId||"").trim();if(!/^[0-9a-f-]{20,80}$/i.test(historyId))return res.status(400).json({error:"מזהה שיר לא תקין"});
+ if(!req.file)return res.status(400).json({error:"לא התקבל קובץ השיר"});
+ try{
+  const rows=await sb("analysis_history?select=id,title,artist,analysis,original_filename,audio_sha256,duration_ms,normalized_title,normalized_artist,identity_key&id=eq."+encodeURIComponent(historyId)+"&limit=1"),source=Array.isArray(rows)?rows[0]:null;
+  if(!source||!source.analysis)return res.status(404).json({error:"השיר שנבחר כבר אינו זמין"});
+  const buffer=await fs.readFile(req.file.path),hash=crypto.createHash("sha256").update(buffer).digest("hex"),meta=await extractAudioMetadata(req.file.path),fn=filenameHint(req.file.originalname||"");
+  const matches=await findReusableSongMatches({filename:fn,audioMetadata:meta,audioSha256:hash,durationSeconds:Number(meta.duration)||0}),selected=matches.find(x=>x.id===historyId);
+  if(!selected||selected.score<.86)return res.status(409).json({error:"ההתאמה כבר לא אומתה. בחר בניתוח מחדש."});
+  const accountId=accountIdForUser(session.user),reused=cleanAnalysis(source.analysis);let savedAudioPath="";
+  try{savedAudioPath=await uploadSongToStorage(accountId,req.file.path,req.file.originalname||fn,req.file.mimetype||"audio/mpeg");}catch(e){console.warn("Reuse storage warning",String(e&&e.message||e).slice(0,200));}
+  const savedHistoryId=await saveAnalysisHistory(accountId,reused,{audioPath:savedAudioPath,originalFilename:req.file.originalname||fn,mimeType:req.file.mimetype||"audio/mpeg",fileSize:buffer.length,audioSha256:hash,durationMs:Number(reused.duration)>0?Math.round(Number(reused.duration)*1000):Math.round(Number(meta.duration||0)*1000)});
+  res.setHeader("Cache-Control","no-store");res.json({analysis:reused,reused:true,historyId:savedHistoryId,match:{title:selected.title,artist:selected.artist,method:selected.method}});
+ }catch(error){console.error("Song reuse failed",String(error&&error.stack||error));res.status(500).json({error:"לא ניתן להציג את הניתוח הקיים: "+String(error&&error.message||error).slice(0,300)});}
+ finally{try{await fs.unlink(req.file.path);}catch{}}
 });
 
 const NOTES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
