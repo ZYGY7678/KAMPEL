@@ -584,7 +584,7 @@ app.post("/api/auth/register",async function(req,res){
   const email=normalizeEmail(req.body&&req.body.email);
   const password=String(req.body&&req.body.password||"");
   if(name.length<2||name.length>80)return res.status(400).json({error:"השם חייב להכיל בין 2 ל־80 תווים"});
-  if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return res.status(400).json({error:"כתובת האימייל לא תקינה"});
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return res.status(400).json({error:"כתובת האימייל לא תקינה"});
   if(password.length<8||password.length>200)return res.status(400).json({error:"הסיסמה חייבת להכיל בין 8 ל־200 תווים"});
   if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});
   let createdAccount=false;
@@ -656,7 +656,7 @@ app.post("/api/auth/register",async function(req,res){
 app.post("/api/auth/login",async function(req,res){
   const email=normalizeEmail(req.body&&req.body.email);
   const password=String(req.body&&req.body.password||"");
-  if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return res.status(400).json({error:"כתובת האימייל לא תקינה"});
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return res.status(400).json({error:"כתובת האימייל לא תקינה"});
   if(!password)return res.status(400).json({error:"יש להזין סיסמה"});
   if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});
   try{
