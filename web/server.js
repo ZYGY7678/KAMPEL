@@ -1130,25 +1130,43 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
   try{
     logOperation(operationIdValue,"chordino_started","שולחים את האודיו למנוע Sonic Annotator + Chordino");
     const bytes=await fs.readFile(filePath);
-    let response;
-    try{
-      const form=new FormData();
-      form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
-      response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
-        method:"POST",
-        headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
-        body:form,
-        signal:controller.signal
-      });
-    }catch(error){
-      throw error;
-    }
-    const raw=await response.text();let data={};
-    try{data=raw?JSON.parse(raw):{};}catch(parseError){
-      const contentType=String(response.headers.get("content-type")||"לא צוין");
-      const preview=String(raw||"").replace(/\\s+/g," ").slice(0,240);
-      const error=new Error("שירות Chordino החזיר גוף שאינו JSON; HTTP "+response.status+"; Content-Type: "+contentType+"; תשובה: "+(preview||"[ריק]"));
-      error.chordinoStatus=response.status;error.code="CHORDINO_INVALID_RESPONSE";throw error;
+    let response,raw="",data={},lastError=null;
+    const maxAttempts=3;
+    for(let attempt=1;attempt<=maxAttempts;attempt++){
+      try{
+        const form=new FormData();
+        form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
+        response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
+          method:"POST",
+          headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
+          body:form,
+          signal:controller.signal
+        });
+        raw=await response.text();
+        if(response.ok){
+          try{data=raw?JSON.parse(raw):{};}
+          catch(parseError){
+            const contentType=String(response.headers.get("content-type")||"לא צוין");
+            const preview=String(raw||"").replace(/\\s+/g," ").slice(0,240);
+            const invalid=new Error("שירות Chordino החזיר גוף שאינו JSON; HTTP "+response.status+"; Content-Type: "+contentType+"; תשובה: "+(preview||"[ריק]"));
+            invalid.chordinoStatus=response.status;invalid.code="CHORDINO_INVALID_RESPONSE";throw invalid;
+          }
+          break;
+        }
+        const retryable=response.status===502||response.status===503||response.status===504||response.status===429;
+        const contentType=String(response.headers.get("content-type")||"לא צוין");
+        const preview=String(raw||"").replace(/\\s+/g," ").slice(0,180);
+        lastError=new Error("Chordino HTTP "+response.status+"; Content-Type: "+contentType+"; "+preview);
+        lastError.chordinoStatus=response.status;
+        if(!retryable||attempt===maxAttempts)throw lastError;
+      }catch(error){
+        lastError=error;
+        const retryable=!error.chordinoStatus||[429,502,503,504].includes(Number(error.chordinoStatus))||error.name==="TypeError";
+        if(!retryable||attempt===maxAttempts||controller.signal.aborted)throw error;
+      }
+      const delayMs=attempt*2500;
+      logOperation(operationIdValue,"chordino_retry","Chordino לא זמין זמנית (ניסיון "+attempt+"/"+maxAttempts+"); ניסיון חוזר בעוד "+(delayMs/1000)+" שניות","warning");
+      await new Promise(function(resolve){setTimeout(resolve,delayMs);});
     }
     if(!response.ok){
       const detail=data&&data.detail||data&&data.error||"שירות Chordino נכשל";
