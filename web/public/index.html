@@ -766,9 +766,12 @@ function updatePlaybackModeUI(){var original=document.getElementById("originalMo
 function switchAudioSourcePreservingPosition(src,position,wasPlaying){return new Promise(function(resolve,reject){if(!src){reject(new Error("קובץ השמע אינו זמין"));return;}var settled=false;function cleanup(){audio.removeEventListener("loadedmetadata",loaded);audio.removeEventListener("error",failed);}function loaded(){if(settled)return;settled=true;cleanup();try{audio.currentTime=Math.min(Math.max(0,position||0),Number.isFinite(audio.duration)?audio.duration:Math.max(0,position||0));if(wasPlaying)audio.play().catch(function(){});resolve();}catch(e){reject(e);}}function failed(){if(settled)return;settled=true;cleanup();reject(new Error("לא ניתן לטעון את קובץ השמע שנבחר"));}audio.addEventListener("loadedmetadata",loaded);audio.addEventListener("error",failed);audio.src=src;audio.load();if(audio.readyState>=1)loaded();});}
 async function setPlaybackMode(mode){if(mode==="original"){var wasPlaying=!audio.paused,position=audio.currentTime||0;playbackMode="original";try{await switchAudioSourcePreservingPosition(audioUrl,position,wasPlaying);}catch(e){setError("editorError",e.message||"לא ניתן לחזור לשיר המקורי");}updatePlaybackModeUI();return;}if(!selectedFile||separationBusy)return;var previousTime=audio.currentTime||0,wasPlaying=!audio.paused;if(separatedVocalsUrl){playbackMode="vocals";try{await switchAudioSourcePreservingPosition(separatedVocalsUrl,previousTime,wasPlaying);}catch(e){setError("editorError",e.message||"לא ניתן לטעון את קול הזמר");playbackMode="original";}updatePlaybackModeUI();return;}separationBusy=true;updatePlaybackModeUI();audio.pause();try{var fd=new FormData();fd.append("audio",selectedFile);var response=await fetch("/api/separate-vocals",{method:"POST",credentials:"include",cache:"no-store",headers:{"X-Gemini-API-Key":currentApiKey()},body:fd}),data=await response.json().catch(function(){return{}});if(!response.ok)throw new Error(data.error||"הפרדת הקול נכשלה");if(!data.vocalsUrl||!/^https:\/\//i.test(data.vocalsUrl))throw new Error("השרת לא החזיר קובץ קול זמר תקין");separatedVocalsUrl=data.vocalsUrl;playbackMode="vocals";await switchAudioSourcePreservingPosition(separatedVocalsUrl,previousTime,wasPlaying);setError("editorError","");}catch(error){setError("editorError",error.message||"הפרדת הקול נכשלה");playbackMode="original";try{await switchAudioSourcePreservingPosition(audioUrl,previousTime,wasPlaying);}catch(e){}}finally{separationBusy=false;updatePlaybackModeUI();}}
 function togglePlay(){if(!audio.src)return;if(audio.paused)audio.play();else audio.pause()}
+function cancelLyricsAutoScroll(body){
+ if(body&&body._autoScrollAnim){cancelAnimationFrame(body._autoScrollAnim);body._autoScrollAnim=null;}
+}
 function noteLyricsManualScroll(){
  var body=document.getElementById("lyricsBody");
- if(body){body._manualScrollUntil=Date.now()+8000;body._autoScrollAnim=null;}
+ if(body){body._manualScrollUntil=Date.now()+8000;cancelLyricsAutoScroll(body);}
 }
 function isLyricsAutoScrollBlocked(body){return Number(body&&body._manualScrollUntil||0)>Date.now();}
 function wireLyricsManualScroll(){
@@ -790,30 +793,34 @@ function lyricsScrollTargetY(target){
  var rect=target.getBoundingClientRect(),vh=window.innerHeight||document.documentElement.clientHeight||800,header=document.querySelector(".top"),headerH=header?header.getBoundingClientRect().height:0;
  return Math.max(0,window.scrollY+rect.top+rect.height/2-Math.max(headerH+24,vh*0.38));
 }
-function setLyricsScrollSpeed(value){var n=Number(value);lyricsScrollSpeed=Math.max(0.5,Math.min(2.5,Number.isFinite(n)?n:1));var label=document.getElementById("lyricsScrollSpeedValue");if(label)label.textContent=lyricsScrollSpeed.toFixed(2).replace(/0+$/,"").replace(/\\.$/,"")+"×";var body=document.getElementById("lyricsBody");if(body)body._uniformScroll=null;}
-function updateLyricsAutoScroll(t){
+function setLyricsScrollSpeed(value){
+ var n=Number(value);lyricsScrollSpeed=Math.max(0.5,Math.min(2.5,Number.isFinite(n)?n:1));
+ var label=document.getElementById("lyricsScrollSpeedValue");
+ if(label)label.textContent=lyricsScrollSpeed.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")+"×";
  var body=document.getElementById("lyricsBody");
- if(!body||!analysis||isLyricsAutoScrollBlocked(body))return;
- var duration=Number(audio.duration)||Number(analysis.duration)||0;
- if(!Number.isFinite(duration)||duration<=0)return;
- if(Number.isFinite(body._uniformLastTime)&&t<body._uniformLastTime-0.35){body._uniformScroll=null;}
- var metrics=body._uniformScroll;
- var doc=document.documentElement,docMax=Math.max(0,doc.scrollHeight-window.innerHeight),rect=body.getBoundingClientRect();
- var startY=Math.max(0,Math.min(docMax,window.scrollY+rect.top-100));
- var endY=docMax;
- if(!metrics){
-   var progress=Math.max(0,Math.min(1,t/duration));
-   var natural=startY+(endY-startY)*Math.pow(progress,1/lyricsScrollSpeed);
-   metrics=body._uniformScroll={startY:startY,endY:endY,duration:duration,offset:window.scrollY-natural};
- }
- var progress=Math.max(0,Math.min(1,t/metrics.duration));
- var y=metrics.startY+(metrics.endY-metrics.startY)*Math.pow(progress,1/lyricsScrollSpeed)+metrics.offset;
- y=Math.max(0,Math.min(docMax,y));
- document.documentElement.scrollTop=y;
- document.body.scrollTop=y;
- body._uniformLastTime=t;
- if(progress>=1)body._uniformScroll=null;
+ if(body)cancelLyricsAutoScroll(body);
 }
+function animateLyricsScrollTo(target){
+ var body=document.getElementById("lyricsBody");
+ if(!body||!target||isLyricsAutoScrollBlocked(body))return;
+ cancelLyricsAutoScroll(body);
+ var startY=window.scrollY,endY=lyricsScrollTargetY(target),distance=Math.abs(endY-startY);
+ if(distance<2){body._autoScrollAnim=null;return;}
+ var duration=Math.max(140,Math.min(900,(520+Math.min(distance,700)*0.45)/lyricsScrollSpeed));
+ var started=performance.now();
+ function step(now){
+   if(isLyricsAutoScrollBlocked(body)){body._autoScrollAnim=null;return;}
+   var progress=Math.min(1,(now-started)/duration);
+   var eased=progress<0.5?2*progress*progress:1-Math.pow(-2*progress+2,2)/2;
+   var y=startY+(endY-startY)*eased;
+   document.documentElement.scrollTop=y;
+   document.body.scrollTop=y;
+   if(progress<1)body._autoScrollAnim=requestAnimationFrame(step);
+   else body._autoScrollAnim=null;
+ }
+ body._autoScrollAnim=requestAnimationFrame(step);
+}
+function updateLyricsAutoScroll(){}
 
 function updatePlaybackHighlight(t,forceScroll){
  var body=document.getElementById("lyricsBody");if(!body||!analysis)return;var best=null;
@@ -823,10 +830,43 @@ function updatePlaybackHighlight(t,forceScroll){
  if(target){
    var model=(analysis.lines||[]).find(function(item){return String(item.id)===best.lineId}),words=model&&model.words||[],index=words.findIndex(function(w){return String(w.id||"")===best.wordId});
    if(index>=0)wordTarget=target.querySelectorAll(".word")[index]||null;
-   body._lastAutoLineId=best.lineId;body._lastAutoWordId=best.lineId+":"+best.wordId;
+   var previousLineId=body._lastAutoLineId||"";
+   var previousWordId=body._lastAutoWordId||"";
+   target.classList.add("active");
+   if(wordTarget)wordTarget.classList.add("is-playing");
+   document.querySelectorAll("#chordList .chord-event").forEach(function(el){
+     el.classList.toggle("is-playing",String(el.dataset.chordIndex)===""+activeChordIndexAt(t));
+   });
+   if(forceScroll||previousLineId!==best.lineId){
+     animateLyricsScrollTo(target);
+   }
+   body._lastAutoLineId=best.lineId;
+   body._lastAutoWordId=best.lineId+":"+best.wordId;
+ }else{
+   if(forceScroll)cancelLyricsAutoScroll(body);
  }
 }
-function updatePlaybackUI(){var t=Number(audio.currentTime)||0,d=Number.isFinite(audio.duration)?audio.duration:Number(analysis&&analysis.duration)||0,now=document.getElementById("nowTime"),total=document.getElementById("totalTime"),ph=document.getElementById("playhead"),nc=document.getElementById("nowChord");if(now)now.textContent=formatTime(t);if(total)total.textContent=formatTime(d);if(ph)ph.style.left=(d?Math.max(0,Math.min(100,t/d*100)):0)+"%";var activeIndex=activeChordIndexAt(t),arr=analysis&&analysis.chords||[];if(nc)nc.textContent=activeIndex>=0?transformedChord(arr[activeIndex].chord):"—";document.querySelectorAll("#chordList .chord-event,#lyricsBody .chord").forEach(function(el){el.classList.remove("is-playing")});updatePlaybackHighlight(t,false)}var playbackFrameId=0;function playbackFrame(){playbackFrameId=0;updatePlaybackUI();updateLyricsAutoScroll(Number(audio.currentTime)||0);if(!audio.paused&&!audio.ended)playbackFrameId=requestAnimationFrame(playbackFrame)}function startPlaybackSync(){if(!playbackFrameId)playbackFrameId=requestAnimationFrame(playbackFrame)}function stopPlaybackSync(){if(playbackFrameId){cancelAnimationFrame(playbackFrameId);playbackFrameId=0;}updatePlaybackUI()}audio.addEventListener("timeupdate",updatePlaybackUI);audio.addEventListener("seeking",updatePlaybackUI);audio.addEventListener("seeked",updatePlaybackUI);audio.addEventListener("ratechange",updatePlaybackUI);audio.addEventListener("play",function(){document.getElementById("playBtn").textContent="Ⅱ";startPlaybackSync()});audio.addEventListener("pause",function(){document.getElementById("playBtn").textContent="▶";stopPlaybackSync()});audio.addEventListener("ended",stopPlaybackSync);
+function updatePlaybackUI(){
+ var t=Number(audio.currentTime)||0,d=Number.isFinite(audio.duration)?audio.duration:Number(analysis&&analysis.duration)||0,now=document.getElementById("nowTime"),total=document.getElementById("totalTime"),ph=document.getElementById("playhead"),nc=document.getElementById("nowChord");
+ if(now)now.textContent=formatTime(t);
+ if(total)total.textContent=formatTime(d);
+ if(ph)ph.style.left=(d?Math.max(0,Math.min(100,t/d*100)):0)+"%";
+ var activeIndex=activeChordIndexAt(t),arr=analysis&&analysis.chords||[];
+ if(nc)nc.textContent=activeIndex>=0?transformedChord(arr[activeIndex].chord):"—";
+ document.querySelectorAll("#chordList .chord-event,#lyricsBody .chord").forEach(function(el){el.classList.remove("is-playing")});
+ updatePlaybackHighlight(t,false);
+}
+var playbackFrameId=0;
+function playbackFrame(){playbackFrameId=0;updatePlaybackUI();if(!audio.paused&&!audio.ended)playbackFrameId=requestAnimationFrame(playbackFrame)}
+function startPlaybackSync(){if(!playbackFrameId)playbackFrameId=requestAnimationFrame(playbackFrame)}
+function stopPlaybackSync(){if(playbackFrameId){cancelAnimationFrame(playbackFrameId);playbackFrameId=0;}updatePlaybackUI()}
+audio.addEventListener("timeupdate",updatePlaybackUI);
+audio.addEventListener("seeking",function(){var body=document.getElementById("lyricsBody");if(body)cancelLyricsAutoScroll(body);updatePlaybackUI();});
+audio.addEventListener("seeked",updatePlaybackUI);
+audio.addEventListener("ratechange",updatePlaybackUI);
+audio.addEventListener("play",function(){document.getElementById("playBtn").textContent="Ⅱ";startPlaybackSync()});
+audio.addEventListener("pause",function(){document.getElementById("playBtn").textContent="▶";stopPlaybackSync()});
+audio.addEventListener("ended",stopPlaybackSync);
 function applyLyricsFontSize(value){var select=document.getElementById("wordFontSize"),body=document.getElementById("lyricsBody"),size=Number(value)||(select?Number(select.value):24)||24;if(!body)return;size=Math.max(4,Math.min(36,size));body.style.setProperty("--lyrics-font-size",(size*58/24)+"px");body.style.setProperty("--lyrics-chord-size",(size*29/24)+"px")}
 document.getElementById("wordFontSize").addEventListener("change",function(){applyLyricsFontSize(this.value)});
 function exportPDF(){if(!analysis)return;window.print()}
