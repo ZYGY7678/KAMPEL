@@ -1031,11 +1031,18 @@ async function analyzeChordinoInChunks(filePath,originalName,mimeType,operationI
         confidence:Math.max(0,Math.min(1,Number(chord.confidence)||0.8))
       };
     })
-    .filter(function(chord){return chord.chord&&chord.end>chord.start;});
+    .filter(function(chord){return chord.chord&&chord.end>chord.start;})
+    .sort(function(a,b){return a.start-b.start;});
+  for(let i=0;i<chords.length;i+=1){
+    const next=chords[i+1];
+    if(next&&next.start>chords[i].start)chords[i].end=Math.min(chords[i].end,next.start);
+    if(i===chords.length-1)chords[i].end=Math.min(totalDuration,chords[i].end);
+  }
+  const timeline=chords.filter(function(chord){return chord.end>chord.start;});
 
-  if(!chords.length)throw new Error("Chordino המפוצל לא החזיר אירועי אקורד");
-  logOperation(operationIdValue,"chordino_chunking_completed","כל המקטעים סונכרנו לציר הזמן המקורי: "+chords.length+" אירועי אקורד על פני "+totalDuration.toFixed(2)+" שניות");
-  return {duration:totalDuration,chords:chords,chunkCount:chunkPlans.length};
+  if(!timeline.length)throw new Error("Chordino המפוצל לא החזיר אירועי אקורד");
+  logOperation(operationIdValue,"chordino_chunking_completed","כל המקטעים סונכרנו לציר הזמן המקורי: "+timeline.length+" אירועי אקורד על פני "+totalDuration.toFixed(2)+" שניות");
+  return {duration:totalDuration,chords:timeline,chunkCount:chunkPlans.length};
 }
 
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
