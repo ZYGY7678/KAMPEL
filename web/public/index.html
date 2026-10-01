@@ -134,6 +134,18 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 #home{display:block}
 #home.hidden{display:none!important}
 </style>
+<style>
+.developer-message-modal{position:fixed;inset:0;z-index:220;display:grid;place-items:center;padding:16px;background:rgba(3,12,22,.76);backdrop-filter:blur(10px)}
+.developer-message-dialog{width:min(620px,100%);max-height:min(90vh,820px);overflow:auto;padding:24px;border-radius:22px;background:#0b1d31;border:1px solid rgba(120,190,220,.22);box-shadow:0 28px 100px #0009}
+.developer-message-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.developer-message-head h2{margin:0 0 6px}.developer-message-head p{margin:0;color:#8da1b8;font-size:12px;line-height:1.6}
+.developer-message-user{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}.developer-message-user>div{padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.025)}.developer-message-user span{display:block;color:#70879d;font-size:9px;margin-bottom:4px}.developer-message-user strong{display:block;color:#d7e7f3;font-size:12px;overflow-wrap:anywhere}
+.developer-message-dialog label{display:block;color:#9eb2c7;font-size:12px;margin-bottom:6px}.developer-message-dialog textarea{width:100%;resize:vertical;min-height:170px;padding:13px;border:1px solid var(--line);border-radius:12px;background:#071522;color:#edf5ff;font:inherit;line-height:1.65}.developer-message-dialog textarea:focus{outline:none;border-color:rgba(103,216,210,.5)}
+.developer-disclaimer{padding:11px 12px;border:1px solid rgba(255,204,120,.17);border-radius:11px;background:rgba(255,190,80,.045);color:#aebfd0;font-size:10px;line-height:1.6;margin:12px 0 0}
+.developer-message-actions{display:flex;gap:8px;margin-top:12px}.developer-message-actions button{flex:1}
+.developer-message-status{min-height:20px;color:#8fdccf;font-size:11px;margin-top:8px}
+.admin-messages-list{display:grid;gap:9px;margin-top:10px;max-height:430px;overflow:auto;padding-right:2px}.admin-message-card{padding:12px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.02)}.admin-message-meta{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.admin-message-meta strong{color:#d9e9f5;font-size:12px}.admin-message-meta small{color:#70879d;font-size:9px;text-align:left}.admin-message-email{color:#82cddd;font-size:10px;margin-top:2px;overflow-wrap:anywhere}.admin-message-body{margin-top:9px;padding-top:9px;border-top:1px solid var(--line);color:#c5d5e3;font-size:11px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.admin-message-source{display:inline-block;margin-top:8px;padding:4px 7px;border-radius:999px;background:rgba(103,216,210,.07);border:1px solid rgba(103,216,210,.15);color:#91d8d2;font-size:8px}
+@media(max-width:650px){.developer-message-user{grid-template-columns:1fr}.developer-message-dialog{padding:18px}.developer-message-actions{flex-direction:column}}
+</style>
 </head>
 <body>
 <div class="app">
@@ -151,7 +163,8 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
       <button type="button" class="side-menu-item" onclick="openMySongs();closeSideMenu()"><span>🎵</span><div><b>שירים שלי</b><small>השירים והניתוחים שנשמרו</small></div></button>
       <button type="button" class="side-menu-item" onclick="openSideSection('api')"><span>🔑</span><div><b>הזנת מפתח API</b><small>ניהול מפתח Gemini האישי</small></div></button>
       <button type="button" class="side-menu-item" onclick="openSideSection('premium')"><span>⭐</span><div><b>שדרוג ל־Premium</b><small>מצב החשבון ואפשרויות השדרוג</small></div></button>
-      <a class="side-menu-item" href="https://mitmachim.top/user/%D7%9E%D7%95%D7%A7%D7%93%20%D7%94%D7%9E%D7%A2%D7%A8%D7%9B%D7%95%D7%AA" target="_blank" rel="noopener" onclick="closeSideMenu()"><span>💬</span><div><b>הודעה למפתח</b><small>פתיחת עמוד המפתח במתמחים טופ</small></div></a>
+      <button id="developerMessageMenuItem" type="button" class="side-menu-item" onclick="openDeveloperMessage('contact');closeSideMenu()"><span>💬</span><div><b>הודעה למפתח</b><small>שלח הודעה ישירות למפתח</small></div></button>
+      <button id="adminMessagesMenuItem" type="button" class="side-menu-item hidden" onclick="openSideSection('admin')"><span>📨</span><div><b>הודעות שנשלחו</b><small>צפייה בהודעות המשתמשים</small></div></button>
       <button id="adminMenuItem" type="button" class="side-menu-item hidden" onclick="openSideSection('admin')"><span>🛠️</span><div><b>גישת מנהל</b><small>ניהול Premium ויומן ניתוחים</small></div></button>
       <button type="button" class="side-menu-item" onclick="openThemeSettings();closeSideMenu()"><span>⚙️</span><div><b>מראה האתר</b><small>מצב יום, לילה וצבעי הדגש</small></div></button>
     </nav>
@@ -175,13 +188,14 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 <p id="planDescription">כל התכונות פתוחות בחינם, ללא מכסה יומית וללא מסלול Premium.</p>
 <p id="dailyStatus">במסלול הרגיל ניתן לנתח שיר אחד בכל שבוע.</p><p id="dailyCountdown" class="quota-countdown hidden" aria-live="polite"></p>
 <p id="premiumOffer" class="premium-offer">5 הראשונים יקבלו Premium ב־15 ₪ בלבד, חד־פעמי ולכל החיים. לאחר 5 הראשונים המחיר עולה ל־30 ₪.</p>
-<div class="plan-actions"><button id="upgradeBtn" class="primary" onclick="startPremiumCheckout()">שדרוג ל־Premium</button><button id="refreshPlanBtn" class="ghost" onclick="loadAccountState()">רענן מצב חשבון</button></div>
-<p id="paymentNote" style="color:#70879d"></p>
+<div class="plan-actions"><button id="upgradeBtn" class="primary" onclick="startPremiumCheckout()">שדרג כעת</button><button id="refreshPlanBtn" class="ghost" onclick="loadAccountState()">רענן מצב חשבון</button></div>
+<p id="paymentNote" class="developer-disclaimer">אין כל חיוב מצד המפתח. אם האתר לא יעבוד או יקרוס, המפתח לא חייב בכלום. עמכם הסליחה.</p>
 </div>
 </div><div id="sideSectionAdmin" class="side-section hidden">
-<div class="side-section-title"><strong>🛠️ גישת מנהל</strong><button class="ghost" type="button" onclick="hideSideSections()">×</button></div>
+<div class="side-section-title"><strong>📨 הודעות שנשלחו</strong><button class="ghost" type="button" onclick="hideSideSections()">×</button></div>
 <section id="adminPanel" class="card admin-panel hidden">
-<div class="plan-head"><strong>ניהול מנהל</strong><span class="instrument-badge">גישה מנהלית</span></div>
+<div class="developer-admin-messages"><div class="plan-head"><strong>📨 הודעות שנשלחו</strong><button class="ghost" type="button" onclick="loadAdminMessages()">רענן</button></div><div id="adminMessagesList" class="admin-messages-list"><div class="activity-empty">טוען הודעות…</div></div></div>
+<div class="plan-head" style="margin-top:16px"><strong>ניהול מנהל</strong><span class="instrument-badge">גישה מנהלית</span></div>
 <div class="admin-grid">
 <div><div class="label">ניהול Premium</div><div class="admin-actions"><input id="adminEmail" type="email" placeholder="user@example.com"><button class="primary" type="button" onclick="adminSetPremium(true)">＋ הוסף Premium</button><button class="ghost" type="button" onclick="adminSetPremium(false)">− הסר Premium</button></div><div id="adminStatus" class="admin-status"></div><div class="label" style="margin-top:14px">משתמשי Premium ידניים</div><div id="adminPremiumUsers" class="admin-op-list"><div class="activity-empty">טוען…</div></div></div>
 <div><div class="plan-head"><strong>יומן ניתוחים מלא</strong><button class="ghost" type="button" onclick="loadAdminOperations()">רענן</button></div><div id="adminOperations" class="admin-op-list"><div class="activity-empty">טוען…</div></div><pre id="adminLog" class="admin-log">בחר פעולת ניתוח כדי לראות את כל האירועים.</pre><div id="adminSummary" class="admin-status"></div></div>
@@ -191,6 +205,17 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 </div>
 <div id="authModal" class="account-modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" onclick="if(event.target===this)closeAuth()"><div class="account-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="authTitle">כניסה לחשבון</h2><button class="ghost" style="flex:0 0 auto" onclick="closeAuth()">✕</button></div><p id="authIntro">התחבר באמצעות Google או אימייל וסיסמה</p><div class="auth-tabs"><button id="loginTab" class="secondary" onclick="setAuthMode('login')">כניסה</button><button id="registerTab" class="secondary" onclick="setAuthMode('register')">הרשמה</button></div><form id="authForm" onsubmit="submitAuth(event)"><div id="registerNameWrap" class="hidden"><label for="authName">שם מלא</label><input id="authName" autocomplete="name" maxlength="80" placeholder="איך קוראים לך?"></div><div id="registerInstrumentWrap" class="hidden auth-instrument"><label for="authInstrument">באיזה כלי אתה מנגן?</label><select id="authInstrument"><option value="guitar">🎸 גיטרה</option><option value="organ">🎹 אורגן</option></select></div><label for="authEmail">כתובת אימייל</label><input id="authEmail" type="email" autocomplete="email" required placeholder="name@example.com"><label for="authPassword">סיסמה</label><input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="לפחות 8 תווים"><div id="authError" class="auth-error"></div><button id="authSubmit" class="primary" type="submit" style="width:100%">כניסה</button></form><div style="text-align:center;margin:15px 0;color:#71879c;font-size:11px">או</div><button class="secondary" style="width:100%" onclick="location.href='/auth/google'">G&nbsp; המשך עם Google</button></div></div>
 <div id="mySongsModal" class="my-songs-modal hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closeMySongs()"><div class="my-songs-dialog"><div class="auth-actions" style="justify-content:space-between"><div><h2 style="margin:0">🎵 השירים שלי</h2><p style="margin:4px 0 0;color:#7f95aa;font-size:11px">כל השירים והניתוחים שנשמרו אוטומטית בחשבון</p></div><button class="ghost" type="button" onclick="closeMySongs()">✕</button></div><div id="mySongsList" class="saved-song-list"><div class="activity-empty">טוען את השירים…</div></div></div></div>
+<div id="developerMessageModal" class="developer-message-modal hidden" role="dialog" aria-modal="true" aria-labelledby="developerMessageTitle" onclick="if(event.target===this)closeDeveloperMessage()">
+  <div class="developer-message-dialog">
+    <div class="developer-message-head"><div><h2 id="developerMessageTitle">💬 הודעה למפתח</h2><p id="developerMessageIntro">שלח הודעה ישירות למפתח והפרטים שלך יצורפו אוטומטית.</p></div><button class="ghost" type="button" onclick="closeDeveloperMessage()">✕</button></div>
+    <div class="developer-message-user"><div><span>שם</span><strong id="developerMessageName"></strong></div><div><span>מייל</span><strong id="developerMessageEmail"></strong></div></div>
+    <label for="developerMessageText">ההודעה שלך</label>
+    <textarea id="developerMessageText" maxlength="5000" rows="8" placeholder="כתוב כאן את ההודעה שלך"></textarea>
+    <p class="developer-disclaimer">אין כל חיוב מצד המפתח. אם האתר לא יעבוד או יקרוס, המפתח לא חייב בכלום. עמכם הסליחה.</p>
+    <div id="developerMessageStatus" class="developer-message-status"></div>
+    <div class="developer-message-actions"><button id="developerMessageSend" class="primary" type="button" onclick="submitDeveloperMessage()">📨 שלח הודעה</button><button class="ghost" type="button" onclick="closeDeveloperMessage()">ביטול</button></div>
+  </div>
+</div>
 <div id="songSearchModal" class="song-search-modal hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closeSongSearch()"><div class="song-search-dialog"><div class="auth-actions" style="justify-content:space-between"><div><h2 style="margin:0">🔎 חפש שיר בגוגל</h2><p style="margin:4px 0 0;color:#7f95aa;font-size:11px">החיפוש מבוצע באמצעות Gemini Flash Lite עם חיפוש Google</p></div><button class="ghost" type="button" onclick="closeSongSearch()">✕</button></div><div class="search-form"><label for="songSearchArtist">שם מלא של הזמר</label><input id="songSearchArtist" placeholder="לדוגמה: עידן רייכל"><label for="songSearchTitle">שם מלא של השיר</label><input id="songSearchTitle" placeholder="לדוגמה: ממעמקים"><label for="songSearchDetails">פרטים נוספים (אופציונלי)</label><textarea id="songSearchDetails" placeholder="שנת יציאה, אלבום, גרסה, שפה או כל פרט שיעזור למצוא את ההקלטה המדויקת"></textarea><div class="search-actions"><button id="songSearchBtn" class="primary" type="button" onclick="searchSong()">🔎 חפש את השיר</button><button class="ghost" type="button" onclick="closeSongSearch()">ביטול</button></div><div id="songSearchStatus" class="search-status"></div></div><div id="songSearchResult"></div></div></div>
 <div id="downloadReturnModal" class="download-return-modal hidden" role="dialog" aria-modal="true"><div class="download-return-dialog"><h2 style="margin:0 0 7px">📥 אנא הוסף את השיר מההורדות</h2><p style="color:#8da1b8;font-size:12px;line-height:1.6">החיפוש הסתיים. עכשיו חזור לקבצים שהורדת במכשיר ובחר את קובץ השיר כדי להעלות אותו ל־Chord Studio.</p><button class="primary" type="button" style="width:100%" onclick="closeDownloadReturnPrompt();setStage('home');fileInput.click()">📂 פתח את ההורדות ובחר את השיר</button><button class="ghost" type="button" style="width:100%;margin-top:8px" onclick="closeDownloadReturnPrompt()">אעשה זאת אחר כך</button></div></div>
 <div id="apiOnboardingModal" class="account-modal hidden" role="dialog" aria-modal="true">
@@ -334,6 +359,7 @@ function openSideSection(section){
   initializeSideMenuHosts();
   var overlay=document.getElementById("sideMenuOverlay");if(overlay){overlay.classList.remove("hidden");document.body.classList.add("menu-open");}
   ["api","premium","admin"].forEach(function(name){var el=document.getElementById("sideSection"+name.charAt(0).toUpperCase()+name.slice(1));if(el)el.classList.toggle("hidden",name!==section);});
+  if(section==="admin"&&accountState&&accountState.isAdmin&&typeof loadAdminMessages==="function"){loadAdminMessages();}
 }
 </script><script>
 var selectedFile = null;
@@ -398,6 +424,67 @@ function scheduleAutoSave(){
       if(!r.ok)console.warn("Auto-save failed",r.status);
     }catch(e){console.warn("Auto-save failed",String(e&&e.message||e));}
   },700);
+}
+function updateMessageMenuVisibility(authenticated,isAdmin){
+  var userItem=document.getElementById("developerMessageMenuItem"),adminItem=document.getElementById("adminMessagesMenuItem");
+  if(userItem)userItem.classList.toggle("hidden",Boolean(isAdmin));
+  if(adminItem)adminItem.classList.toggle("hidden",!Boolean(isAdmin));
+}
+function openDeveloperMessage(source){
+  if(!accountState.authenticated){setError("homeError","יש להתחבר לחשבון כדי לשלוח הודעה למפתח");closeSideMenu();openAuth("login");return;}
+  var modal=document.getElementById("developerMessageModal"),text=document.getElementById("developerMessageText"),name=document.getElementById("developerMessageName"),email=document.getElementById("developerMessageEmail"),title=document.getElementById("developerMessageTitle"),intro=document.getElementById("developerMessageIntro"),status=document.getElementById("developerMessageStatus");
+  if(!modal||!text)return;
+  var user=accountState.user||{};
+  if(name)name.textContent=String(user.name||"");
+  if(email)email.textContent=String(user.email||"");
+  if(status)status.textContent="";
+  if(source==="premium"){
+    if(title)title.textContent="⭐ בקשה לשדרוג ל־Premium";
+    if(intro)intro.textContent="ההודעה הוכנה אוטומטית. אפשר לערוך אותה לפני השליחה.";
+    text.value="שלום אחי אני מעוניין לשדרג לפרימיום תוכל לתת לי פרטים על העברת כסף?";
+  }else{
+    if(title)title.textContent="💬 הודעה למפתח";
+    if(intro)intro.textContent="שלח הודעה ישירות למפתח והפרטים שלך יצורפו אוטומטית.";
+    text.value="";
+  }
+  modal.dataset.source=source==="premium"?"premium":"contact";
+  modal.classList.remove("hidden");
+  setTimeout(function(){text.focus();},50);
+}
+function closeDeveloperMessage(){var modal=document.getElementById("developerMessageModal");if(modal)modal.classList.add("hidden");}
+async function submitDeveloperMessage(){
+  var modal=document.getElementById("developerMessageModal"),text=document.getElementById("developerMessageText"),btn=document.getElementById("developerMessageSend"),status=document.getElementById("developerMessageStatus");
+  var message=String(text&&text.value||"").trim();
+  if(message.length<2){if(status)status.textContent="יש לכתוב הודעה לפני השליחה";return;}
+  if(!accountState.authenticated){if(status)status.textContent="יש להתחבר לחשבון";return;}
+  if(btn)btn.disabled=true;if(status)status.textContent="שולח את ההודעה…";
+  try{
+    var source=modal&&modal.dataset.source==="premium"?"premium":"contact";
+    var r=await fetch("/api/messages",{method:"POST",credentials:"include",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:message,source:source})});
+    var data=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(data.error||"שליחת ההודעה נכשלה");
+    if(status)status.textContent="ההודעה נשלחה בהצלחה למפתח";
+    if(source!=="premium")text.value="";
+    setTimeout(closeDeveloperMessage,700);
+  }catch(e){if(status)status.textContent=e.message||"שליחת ההודעה נכשלה";}finally{if(btn)btn.disabled=false;}
+}
+async function loadAdminMessages(){
+  var list=document.getElementById("adminMessagesList");if(!list||!accountState.isAdmin)return;
+  list.innerHTML='<div class="activity-empty">טוען הודעות…</div>';
+  try{
+    var r=await fetch("/api/admin/messages",{cache:"no-store",credentials:"include"}),data=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(data.error||"לא ניתן לטעון את ההודעות");
+    renderAdminMessages(Array.isArray(data.messages)?data.messages:[]);
+  }catch(e){list.innerHTML='<div class="error">'+escapeHtml(e.message||"לא ניתן לטעון את ההודעות")+'</div>';}
+}
+function renderAdminMessages(messages){
+  var list=document.getElementById("adminMessagesList");if(!list)return;
+  if(!messages.length){list.innerHTML='<div class="activity-empty">עדיין לא נשלחו הודעות למפתח.</div>';return;}
+  list.innerHTML=messages.map(function(item){
+    var time=item.created_at?new Date(item.created_at).toLocaleString("he-IL"):"";
+    var source=item.source==="premium"?"בקשת Premium":"הודעה למפתח";
+    return '<article class="admin-message-card"><div class="admin-message-meta"><div><strong>'+escapeHtml(item.display_name||"ללא שם")+'</strong><div class="admin-message-email">'+escapeHtml(item.email||"")+'</div></div><small>'+escapeHtml(time)+'</small></div><div class="admin-message-body">'+escapeHtml(item.message||"")+'</div><span class="admin-message-source">'+escapeHtml(source)+'</span></article>';
+  }).join("");
 }
 function openSongSearch(){
   if(!accountState.authenticated){setError("homeError","יש להתחבר כדי לחפש שיר בגוגל");return;}
@@ -497,9 +584,9 @@ function updateUploadGate(){
   if(daily)daily.textContent=!accountState.authenticated?"כדי להשתמש באתר יש להתחבר עם חשבון.":accountState.premium?"מסלול Premium — ללא מגבלת שירים.":Number(weeklyRemaining)<=0?"המכסה השבועית נוצלה.":"נשאר לך שיר אחד לניתוח בשבוע.";
   var showCountdown=Boolean(accountState.authenticated&&!accountState.premium&&Number(weeklyRemaining)<=0&&(accountState.weeklyResetAt||accountState.dailyResetAt)),resetAt=accountState.weeklyResetAt||accountState.dailyResetAt,countdownText=showCountdown?"אפשר לנתח שוב בעוד "+formatQuotaCountdown(resetAt):"";
   ["dailyCountdown","editorQuotaCountdown"].forEach(function(id){var el=document.getElementById(id);if(!el)return;el.classList.toggle("hidden",!showCountdown);if(showCountdown)el.textContent=countdownText;});
-  if(upgrade){upgrade.classList.toggle("hidden",!accountState.authenticated||Boolean(accountState.premium)||!accountState.paymentConfigured);upgrade.textContent=premiumInfo.introRemaining>0?"שדרוג ל־Premium · "+premiumInfo.priceText:"שדרוג ל־Premium · "+premiumInfo.standardPriceText;}
+  if(upgrade){upgrade.classList.toggle("hidden",!accountState.authenticated||Boolean(accountState.premium));upgrade.textContent="שדרג כעת";}
   if(refresh)refresh.classList.toggle("hidden",!accountState.authenticated);
-  if(paymentNote)paymentNote.textContent=accountState.premium?"Premium פעיל לכל החיים / עד שהאתר ייסגר":(!premiumInfo.configured&&accountState.authenticated?"התשלום עדיין לא הוגדר בשרת":"");
+  if(paymentNote)paymentNote.textContent=accountState.premium?"Premium פעיל לכל החיים / עד שהאתר ייסגר":"אין כל חיוב מצד המפתח. אם האתר לא יעבוד או יקרוס, המפתח לא חייב בכלום. עמכם הסליחה.";
   if(offerEl){
     if(!accountState.premium&&premiumInfo.configured&&premiumInfo.introRemaining>0)offerEl.innerHTML="🔥 5 הראשונים: <b>"+premiumInfo.introRemaining+" מקומות נשארו</b> ב־"+premiumInfo.priceText+" בלבד · חד־פעמי ולכל החיים. אחרי 5 הראשונים: "+premiumInfo.standardPriceText+".";
     else if(!accountState.premium&&premiumInfo.configured)offerEl.textContent="מחיר Premium הנוכחי: "+premiumInfo.standardPriceText+" · תשלום חד־פעמי · לכל החיים.";
@@ -771,10 +858,12 @@ async function loadAccountState(){
    var data=await r.json();accountState=Object.assign(accountState,data||{});window.accountState=accountState;
    var account=document.getElementById("account"),login=document.getElementById("loginBtn"),register=document.getElementById("registerBtn"),logout=document.getElementById("logoutBtn");
    if(data.authenticated){
+     updateMessageMenuVisibility(true,Boolean(data.isAdmin));
      account.innerHTML='<span class="profile-dot">'+String((data.user.name||data.user.email||"?").trim().charAt(0)).replace(/[&<>"]/g,"")+'</span>'+String(data.user.name||data.user.email||"חשבון")+" · "+(data.premium?"Premium":"רגיל");
      login.classList.add("hidden");if(register)register.classList.add("hidden");logout.classList.remove("hidden");
      if(!currentApiKey())showApiOnboarding();else hideApiOnboarding();
    }else{
+     updateMessageMenuVisibility(false,false);
      account.textContent="לא מחובר";login.classList.remove("hidden");if(register)register.classList.remove("hidden");logout.classList.add("hidden");hideApiOnboarding();
    }
    try{await loadPremiumInfo();}catch(premiumError){console.warn("Premium status refresh failed",String(premiumError&&premiumError.message||premiumError));}updateUploadGate();
@@ -789,10 +878,10 @@ async function loadAccountState(){
  }catch(e){
    accountState=Object.assign({},accountState,{authenticated:false,user:null,premium:false,plan:"standard"});window.accountState=accountState;
    var account=document.getElementById("account"),login=document.getElementById("loginBtn"),register=document.getElementById("registerBtn"),logout=document.getElementById("logoutBtn");
-   if(account)account.textContent="מצב חשבון לא זמין";if(login)login.classList.remove("hidden");if(register)register.classList.remove("hidden");if(logout)logout.classList.add("hidden");hideApiOnboarding();updateUploadGate();
+   updateMessageMenuVisibility(false,false);if(account)account.textContent="מצב חשבון לא זמין";if(login)login.classList.remove("hidden");if(register)register.classList.remove("hidden");if(logout)logout.classList.add("hidden");hideApiOnboarding();updateUploadGate();
  }
 }
-async function startPremiumCheckout(){if(!accountState.authenticated){setError("homeError","יש להתחבר עם Google לפני רכישת Premium");return;}try{var r=await fetch("/api/premium/checkout",{method:"POST"}),data=await r.json().catch(function(){return{}});if(!r.ok)throw new Error(data.error||"יצירת התשלום נכשלה");if(data.alreadyPremium){await loadAccountState();return;}if(!data.url)throw new Error("לא התקבל קישור לתשלום");location.href=data.url;}catch(e){setError("homeError",e.message||"יצירת התשלום נכשלה")}}
+function startPremiumCheckout(){openDeveloperMessage("premium");}
 function persistGeminiKeys(){
  try{
    var key=currentApiKey();
@@ -808,9 +897,9 @@ document.getElementById("apiKeyOnboarding").addEventListener("input",function(){
 async function logoutGoogle(){try{var r=await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin",cache:"no-store"});if(!r.ok)throw new Error("ההתנתקות נכשלה");accountState={authenticated:false,premium:false,plan:"standard"};window.accountState=accountState;await loadAccountState();closeAuth();}catch(e){setError("homeError",e.message||"ההתנתקות נכשלה");}}
 document.getElementById("account").addEventListener("click",openAccount);document.getElementById("authInstrument").addEventListener("change",function(){setInstrument(this.value)});document.addEventListener("keydown",function(e){if(e.key==="Escape"){closeThemeSettings();closeChordActions();closeDiagram();closeSideMenu();}});document.getElementById("loginBtn").addEventListener("click",function(){openAuth("login")});
 document.querySelector(".top-right").addEventListener("click",function(e){var b=e.target.closest("#loginBtn,#registerBtn");if(!b)return;e.preventDefault();e.stopPropagation();openAuth(b.id==="registerBtn"?"register":"login");},true);document.getElementById("registerBtn").addEventListener("click",function(){openAuth("register")});document.getElementById("logoutBtn").addEventListener("click",logoutGoogle);document.getElementById("loginTab").addEventListener("click",function(){setAuthMode("login")});document.getElementById("registerTab").addEventListener("click",function(){setAuthMode("register")});
-initViewSettings();initializeSideMenuHosts();loadPremiumInfo();loadAccountState().then(function(){if(accountState.isAdmin&&typeof loadAdminOperations==="function")loadAdminOperations()});
+initViewSettings();initializeSideMenuHosts();updateMessageMenuVisibility(false,false);loadPremiumInfo();loadAccountState().then(function(){if(accountState.isAdmin){if(typeof loadAdminOperations==="function")loadAdminOperations();if(typeof loadAdminMessages==="function")loadAdminMessages();}});
 document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")showDownloadReturnPrompt();});
-window.addEventListener("pageshow",function(){showDownloadReturnPrompt();loadAccountState().then(function(){if(accountState.isAdmin)loadAdminOperations()});});
+window.addEventListener("pageshow",function(){showDownloadReturnPrompt();loadAccountState().then(function(){if(accountState.isAdmin){loadAdminOperations();loadAdminMessages();}});});
 setTimeout(showDownloadReturnPrompt,700);
 if(quotaTimer)clearInterval(quotaTimer);quotaTimer=setInterval(tickQuotaCountdown,1000);
 goHome();
