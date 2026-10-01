@@ -598,6 +598,40 @@ app.get("/api/auth/me",async function(req,res){
 });
 app.get("/api/admin/users",async function(req,res){const session=await authSession(req);if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});try{const grants=await loadPremiumGrants();res.json({users:Object.keys(grants).filter(id=>grants[id]===true)});}catch(error){console.error(error);res.status(503).json({error:"לא ניתן לטעון את רשימת הרשאות Premium"});}});
 app.post("/api/admin/premium",async function(req,res){const session=await authSession(req);if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});const email=normalizeEmail(req.body&&req.body.email),enabled=Boolean(req.body&&req.body.enabled);if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return res.status(400).json({error:"כתובת אימייל לא תקינה"});if(supabaseReady()){await sb("premium_grants?on_conflict=email","POST",{email:email,granted:enabled,updated_at:new Date().toISOString()});const account=await sb("app_accounts?select=account_id&email=eq."+encodeURIComponent(email)+"&limit=1");if(account.length)await sb("app_accounts?email=eq."+encodeURIComponent(email),"PATCH",{premium_granted:enabled,updated_at:new Date().toISOString()});}else{const grants=await loadPremiumGrants();if(enabled)grants[email]=true;else delete grants[email];await savePremiumGrants();}res.json({ok:true,email:email,premium:enabled});});
+app.post("/api/messages",async function(req,res){
+ const session=await authSession(req);
+ if(!session)return res.status(401).json({error:"יש להתחבר לחשבון לפני שליחת הודעה למפתח"});
+ const message=String(req.body&&req.body.message||"").trim();
+ const source=String(req.body&&req.body.source||"contact").trim()==="premium"?"premium":"contact";
+ if(message.length<2)return res.status(400).json({error:"יש לכתוב הודעה לפני השליחה"});
+ if(message.length>5000)return res.status(400).json({error:"ההודעה ארוכה מדי"});
+ try{
+   const accountId=accountIdForUser(session.user);
+   const email=normalizeEmail(session.user.email);
+   const displayName=String(session.user.name||email).trim()||email;
+   if(supabaseReady()){
+     const rows=await sb("developer_messages","POST",{account_id:accountId,display_name:displayName,email:email,message:message,source:source,created_at:new Date().toISOString()});
+     const row=Array.isArray(rows)&&rows[0]?rows[0]:null;
+     return res.set("Cache-Control","no-store").json({ok:true,message:row?{id:row.id,display_name:row.display_name,email:row.email,message:row.message,source:row.source,created_at:row.created_at}:null});
+   }
+   return res.status(503).json({error:"שמירת הודעות דורשת חיבור למסד הנתונים"});
+ }catch(error){
+   console.error("Developer message send failed",String(error&&error.stack||error));
+   return res.status(500).json({error:"שליחת ההודעה נכשלה כרגע"});
+ } 
+});
+app.get("/api/admin/messages",async function(req,res){
+ const session=await authSession(req);
+ if(!session||normalizeEmail(session.user.email)!==ADMIN_EMAIL)return res.status(403).json({error:"אין הרשאת מנהל"});
+ if(!supabaseReady())return res.json({messages:[]});
+ try{
+   const rows=await sb("developer_messages?select=id,display_name,email,message,source,created_at&order=created_at.desc&limit=1000");
+   return res.set("Cache-Control","no-store").json({messages:Array.isArray(rows)?rows:[]});
+ }catch(error){
+   console.error("Developer messages load failed",String(error&&error.stack||error));
+   return res.status(503).json({error:"לא ניתן לטעון את ההודעות כרגע"});
+ }
+});
 app.get("/api/history",async function(req,res){
  const session=await authSession(req);if(!session)return res.status(401).json({error:"לא מחובר"});
  if(!supabaseReady())return res.json({history:[]});
