@@ -1017,8 +1017,8 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
         const audioTx=part.audio_transcription||part.audioTranscription||part.audio_transcription_result||part.audioTranscriptionResult;
         if(audioTx&&Array.isArray(audioTx.words)){
           audioTx.words.forEach(function(wordInfo){
-            const start=parseTranscriptionOffset(wordInfo&&wordInfo.startOffset??wordInfo&&wordInfo.start_offset);
-            const end=parseTranscriptionOffset(wordInfo&&wordInfo.endOffset??wordInfo&&wordInfo.end_offset);
+            const start=parseTranscriptionOffset(wordInfo ? (wordInfo.startOffset ?? wordInfo.start_offset) : undefined);
+            const end=parseTranscriptionOffset(wordInfo ? (wordInfo.endOffset ?? wordInfo.end_offset) : undefined);
             const word=String(wordInfo&&wordInfo.word||"").trim();
             if(word&&Number.isFinite(start)&&Number.isFinite(end)&&end>=start)transcriptWords.push({word:word,startOffset:start,endOffset:end});
           });
