@@ -911,6 +911,74 @@ async function requireUploadAccess(req,res,options){
  return true;
 }
 
+function parseTranscriptionOffset(value){
+  if(typeof value==="number"&&Number.isFinite(value))return Math.max(0,value);
+  const raw=String(value==null?"":value).trim().toLowerCase();
+  if(!raw)return NaN;
+  if(/ms$/.test(raw)){const n=Number.parseFloat(raw);return Number.isFinite(n)?Math.max(0,n/1000):NaN;}
+  const n=Number.parseFloat(raw);
+  return Number.isFinite(n)?Math.max(0,n):NaN;
+}
+function normalizeTimelineWord(value){
+  return String(value||"").toLowerCase().normalize("NFD").replace(/[\u0591-\u05C7]/g,"").replace(/[^\p{L}\p{N}]+/gu,"");
+}
+function timelineWordSimilarity(a,b){
+  if(!a||!b)return 0;
+  if(a===b)return 1;
+  if(a.length<2||b.length<2)return 0;
+  if(a.includes(b)||b.includes(a))return 0.88;
+  const prev=new Array(b.length+1),cur=new Array(b.length+1);
+  for(let j=0;j<=b.length;j++)prev[j]=j;
+  for(let i=1;i<=a.length;i++){
+    cur[0]=i;
+    for(let j=1;j<=b.length;j++){
+      const cost=a[i-1]===b[j-1]?0:1;
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+cost);
+    }
+    for(let j=0;j<=b.length;j++)prev[j]=cur[j];
+  }
+  return 1-(prev[b.length]/Math.max(a.length,b.length));
+}
+function alignFinalWordTimes(lines,transcriptionWords,duration){
+  if(!Array.isArray(transcriptionWords)||transcriptionWords.length<3)return 0;
+  const source=transcriptionWords.map(function(item){
+    return {
+      word:String(item&&item.word||"").trim(),
+      token:normalizeTimelineWord(item&&item.word),
+      start:Number(item&&item.startOffset),
+      end:Number(item&&item.endOffset)
+    };
+  }).filter(function(item){
+    return item.token&&Number.isFinite(item.start)&&Number.isFinite(item.end)&&item.end>=item.start;
+  }).sort(function(a,b){return a.start-b.start;});
+  if(source.length<3)return 0;
+  let cursor=0,matched=0;
+  for(const line of (lines||[])){
+    for(const finalWord of (line&&line.words)||[]){
+      const token=normalizeTimelineWord(finalWord&&finalWord.text);
+      if(!token)continue;
+      let bestIndex=-1,bestScore=0;
+      const limit=Math.min(source.length,cursor+40);
+      for(let j=cursor;j<limit;j++){
+        const similarity=timelineWordSimilarity(token,source[j].token);
+        const score=similarity-((j-cursor)*0.004);
+        if(score>bestScore){bestScore=score;bestIndex=j;}
+        if(similarity===1&&(j-cursor)<3)break;
+      }
+      if(bestIndex<0||bestScore<0.70)continue;
+      const hit=source[bestIndex];
+      const safeEnd=Number.isFinite(duration)&&duration>0?Math.min(duration,hit.end):hit.end;
+      if(safeEnd>=hit.start){
+        finalWord.start=hit.start;
+        finalWord.end=Math.max(hit.start,safeEnd);
+        matched+=1;
+      }
+      cursor=bestIndex+1;
+    }
+  }
+  return matched;
+}
+
 async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue){
   const startedAt=Date.now(),maxRetries=10,retryDelayMs=60000;
   for(let attempt=0;;attempt++){
@@ -924,10 +992,10 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
         headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},
         body:JSON.stringify({
           contents:[{role:"user",parts:[
-            {text:"Transcribe the ENTIRE attached recording verbatim in the sung/spoken language. Perform a complete scan from beginning to end, preserving every verse, chorus repetition, instrumental vocal, ad-lib and ending. Return word-level timestamps when available. Do not summarize and do not omit later sections."},
+            {text:"Transcribe the ENTIRE attached recording verbatim in the sung/spoken language. Perform a complete scan from beginning to end, preserving every verse, chorus repetition, instrumental vocal, ad-lib and ending. Return word-level timestamps for every recognized word. Do not summarize and do not omit later sections."},
             {inline_data:{mime_type:mimeType,data:audioBase64}}
           ]}],
-          generationConfig:{audioTranscriptionConfig:{wordTimestamp:true}}
+          generationConfig:{audioTranscriptionConfig:{wordTimestamp:true,mode:"VERBATIM"}}
         }),
         signal:controller.signal
       });
@@ -943,20 +1011,26 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
       }
       const transcriptParts=data.candidates&&data.candidates[0]&&data.candidates[0].content&&Array.isArray(data.candidates[0].content.parts)
         ?data.candidates[0].content.parts:[];
+      const transcriptWords=[];
       const transcript=transcriptParts.map(function(part){
         if(!part)return "";
         const audioTx=part.audio_transcription||part.audioTranscription||part.audio_transcription_result||part.audioTranscriptionResult;
-        return String(part.text||audioTx&&(
-          audioTx.text||
-          Array.isArray(audioTx.words)&&audioTx.words.map(function(word){return word&&word.word||"";}).join(" ")
-        )||"");
+        if(audioTx&&Array.isArray(audioTx.words)){
+          audioTx.words.forEach(function(wordInfo){
+            const start=parseTranscriptionOffset(wordInfo&&wordInfo.startOffset??wordInfo&&wordInfo.start_offset);
+            const end=parseTranscriptionOffset(wordInfo&&wordInfo.endOffset??wordInfo&&wordInfo.end_offset);
+            const word=String(wordInfo&&wordInfo.word||"").trim();
+            if(word&&Number.isFinite(start)&&Number.isFinite(end)&&end>=start)transcriptWords.push({word:word,startOffset:start,endOffset:end});
+          });
+        }
+        return String(part.text||audioTx&&audioTx.text||audioTx&&Array.isArray(audioTx.words)&&audioTx.words.map(function(word){return word&&word.word||"";}).join(" ")||"");
       }).filter(Boolean).join("\n").trim()||String(data.output_text||data.outputText||"").trim();
       if(!transcript.trim()){
         const e=new Error("Gemini Transcribe החזיר תמלול ריק");
         e.geminiStatus=response.status;e.geminiCode="EMPTY_TRANSCRIPT";throw e;
       }
-      logOperation(operationIdValue,"transcription_completed","התמלול המלא הושלם באמצעות "+TRANSCRIBE_MODEL+"; משך "+(Date.now()-startedAt)+"ms");
-      return transcript;
+      logOperation(operationIdValue,"transcription_completed","התמלול המלא הושלם באמצעות "+TRANSCRIBE_MODEL+"; "+transcriptWords.length+" חותמות זמן ברמת מילה; משך "+(Date.now()-startedAt)+"ms");
+      return {text:transcript,words:transcriptWords};
     }catch(error){
       const overload=Number(error&&error.geminiStatus)===429||Number(error&&error.geminiStatus)===503||/RESOURCE_EXHAUSTED|UNAVAILABLE|overload|overloaded|high demand|rate.?limit/i.test(String(error&&error.geminiCode||"")+" "+String(error&&error.message||""));
       if(overload&&attempt<maxRetries){
@@ -972,7 +1046,6 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
     }
   }
 }
-
 async function analyzeWithChordino(filePath,originalName,mimeType,operationIdValue){
   if(!LOCAL_AUDIO_ENGINE_URL||!LOCAL_AUDIO_ENGINE_TOKEN){
     const error=new Error("שירות Chordino לא מוגדר בשרת. חסרים LOCAL_AUDIO_ENGINE_URL או LOCAL_AUDIO_ENGINE_TOKEN.");
@@ -1183,7 +1256,8 @@ app.post("/api/analyze",async function(req,res){
       transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
       analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId)
     ]);
-    const transcript=evidence[0];
+    const transcriptionEvidence=evidence[0];
+    const transcript=String(transcriptionEvidence&&transcriptionEvidence.text||"").trim();
     const chordino=evidence[1];
     if(!Array.isArray(chordino.chords)||!chordino.chords.length)throw new Error("Chordino לא סיפק נתוני אקורדים");
 
@@ -1193,6 +1267,8 @@ app.post("/api/analyze",async function(req,res){
       metadataPromptBlock(filenameHintValue,audioMetadata)+
       "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n"+
       transcript+
+      "\n\nGEMINI 3.5 TRANSCRIBE — WORD TIMESTAMP EVIDENCE (REAL AUDIO OFFSETS):\n"+
+      JSON.stringify((transcriptionEvidence&&transcriptionEvidence.words)||[])+
       "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+
       JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords})+
       "\n\nMUSICAL CONTEXT RULES:\n"+
@@ -1204,6 +1280,8 @@ app.post("/api/analyze",async function(req,res){
     // Preserve the real Chordino timestamps. Do NOT quantize from song start to BPM bars:
     // that introduces cumulative timing drift when a recording changes tempo or breathes naturally.
     finalAnalysis.duration=chordino.duration>0?chordino.duration:finalAnalysis.duration;
+    const alignedWordCount=alignFinalWordTimes(finalAnalysis.lines,(transcriptionEvidence&&transcriptionEvidence.words)||[],finalAnalysis.duration);
+    logOperation(req.operationId,"word_timeline_aligned","סנכרון מחדש לפי חותמות הזמן האמיתיות של Gemini Transcribe: "+alignedWordCount+" מילים קיבלו זמן אודיו מדוד");
     finalAnalysis.chords=collapseAdjacentChordEvents(chordino.chords,0.35).map(function(chord){
       return {
         start:Math.max(0,Number(chord.start)||0),
@@ -1239,7 +1317,7 @@ app.post("/api/analyze",async function(req,res){
       }
       logOperation(req.operationId,"history_save_completed","השיר נשמר אוטומטית בחשבון"+(historyId?" (מזהה "+historyId+")":""));
     }
-    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:finalAnalysis,historyId:historyId,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
+    pendingVerifications.set(req.operationId,{audioBase64:audioBase64,mimeType:mimeType,first:finalAnalysis,transcriptionWords:(transcriptionEvidence&&transcriptionEvidence.words)||[],historyId:historyId,filename:filenameHintValue,audioMetadata:audioMetadata,createdAt:Date.now()});
 
     currentStage="quota_commit";
     let quotaStatus=null;
@@ -1670,6 +1748,7 @@ async function runSelfTest(id) {
       setStage("verification", "Gemini 3.8 Flash מאמת מחדש את התוצאה");
       const verifyPrompt = VERIFY_PREFIX + metadataPromptBlock(filename, audioMetadata) + "\nCandidate JSON:\n" + JSON.stringify(first);
       const verified = cleanAnalysis(await analyzeWithGemini(apiKey, audioBase64, mimeType, verifyPrompt, id, "analysis_verify"));
+      alignFinalWordTimes(verified.lines,transcriptionEvidence.words||[],Number(verified.duration)||Number(chordino.duration)||0);
       if (!Array.isArray(verified.lines) || !verified.lines.length || !Array.isArray(verified.chords) || !verified.chords.length) {
         throw new Error("פלט האימות של Gemini לא הכיל גם מילים וגם אקורדים");
       }
