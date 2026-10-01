@@ -471,6 +471,7 @@ function placeChordAnchors(lines, chords) {
   (lines || []).forEach(function(line) {
     (line.words || []).forEach(function(word) {
       word.chord = null;
+      word.chordOffset = null;
     });
   });
 
@@ -480,34 +481,63 @@ function placeChordAnchors(lines, chords) {
       const start = Number(word.start);
       const end = Number(word.end);
       if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-      allWords.push({
-        word: word,
-        line: line,
-        index: index,
-        start: start,
-        end: Math.max(start, end)
-      });
+      allWords.push({word:word,line:line,index:index,start:start,end:Math.max(start,end)});
     });
   });
-  allWords.sort(function(a, b) {
-    return a.start - b.start || a.index - b.index;
+  allWords.sort(function(a,b){return a.start-b.start || a.index-b.index;});
+
+  const used = new Set();
+  const events = (Array.isArray(chords) ? chords : []).slice().sort(function(a,b){
+    return Number(a.start)-Number(b.start);
   });
 
-  let previousAnchorEnd = -Infinity;
-  for (const chord of (Array.isArray(chords) ? chords : [])) {
+  for (const chord of events) {
     const start = Number(chord.start);
-    const end = Number(chord.end);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    if (!Number.isFinite(start)) continue;
 
-    const suitable = allWords.find(function(item) {
-      return item.end >= start - 0.20 && item.start < end + 0.20 && item.end > previousAnchorEnd + 0.001;
-    });
-    if (!suitable) continue;
-    suitable.word.chord = chord.chord;
-    previousAnchorEnd = suitable.end;
+    let best = null;
+    let bestDistance = Infinity;
+
+    // 1) Prefer the lyric word whose own start is closest to the real chord change.
+    for (const item of allWords) {
+      if (used.has(item.word)) continue;
+      const distance = Math.abs(item.start-start);
+      if (distance <= 0.42 && distance < bestDistance) {
+        best = item;
+        bestDistance = distance;
+      }
+    }
+
+    // 2) If the harmonic change happens inside a sung word, keep that word.
+    if (!best) {
+      for (const item of allWords) {
+        if (used.has(item.word)) continue;
+        if (item.start <= start && start < item.end) {
+          best = item;
+          break;
+        }
+      }
+    }
+
+    // 3) Otherwise use the first following lyric word, but only across a short
+    // gap so instrumental transitions do not steal the next section's first word.
+    if (!best) {
+      for (const item of allWords) {
+        if (used.has(item.word)) continue;
+        if (item.start >= start && item.start-start <= 1.20) {
+          best = item;
+          break;
+        }
+        if (item.start > start+1.20) break;
+      }
+    }
+
+    if (!best) continue;
+
+    best.word.chord = String(chord.chord || "").trim() || null;
+    if (best.word.chord) used.add(best.word);
   }
 }
-
 function cleanAnalysis(value) {
   const data = value && typeof value === "object" ? value : {};
   const duration = Number(data.duration) > 0 ? Number(data.duration) : 0;
