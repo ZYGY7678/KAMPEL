@@ -26,28 +26,72 @@
 .top{z-index:160}.top-right{position:relative;z-index:161;pointer-events:auto}.top-right button{position:relative;z-index:162;pointer-events:auto;touch-action:manipulation}.song-match-modal{position:fixed;inset:0;z-index:950;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.76);backdrop-filter:blur(9px)}.song-match-dialog{width:min(500px,100%);padding:24px;border-radius:22px;background:#0b1d31;border:1px solid rgba(103,216,210,.26);box-shadow:0 28px 110px #000b}.song-match-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.song-match-head h2{margin:0 0 6px;font-size:24px}.song-match-head p{margin:0;color:#8da1b8;font-size:12px;line-height:1.6}.song-match-card{margin:20px 0 12px;padding:18px;border-radius:16px;background:rgba(103,216,210,.055);border:1px solid rgba(103,216,210,.18);display:flex;flex-direction:column;gap:5px}.song-match-card strong{font-size:22px;color:#e8fffb}.song-match-card span{font-size:14px;color:#9fc5cc}.song-match-card small{font-size:11px;color:#6f8da0}.song-match-status{min-height:24px;color:#8fded4;font-size:12px;line-height:1.6}.song-match-actions{display:flex;gap:9px;flex-wrap:wrap}.song-match-actions button{flex:1;min-width:190px}@media(max-width:560px){.song-match-dialog{padding:18px}.song-match-actions{flex-direction:column}.song-match-actions button{width:100%}}
 .account-modal{position:fixed;pointer-events:auto;inset:0;z-index:170;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px)}.account-dialog{width:min(440px,100%);padding:24px;border-radius:20px;background:#0b1d31;border:1px solid rgba(120,190,220,.22);box-shadow:0 24px 90px #0009}.account-dialog h2{margin:0 0 8px}.account-dialog p{color:#8da1b8;font-size:12px;line-height:1.6}.account-dialog input{width:100%;padding:12px;margin:6px 0 12px;border:1px solid var(--line);border-radius:10px;background:#071522;color:#edf5ff}.auth-tabs{display:flex;gap:8px;margin:15px 0}.auth-tabs button{flex:1}.profile-dot{display:inline-grid;place-items:center;width:27px;height:27px;border-radius:50%;background:#17435a;color:#aaf5e6;margin-left:7px;font-weight:800}.auth-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.auth-actions button{flex:1}.auth-error{color:#ffc0c0;font-size:12px;min-height:20px;margin:7px 0}.site-footer{max-width:1160px;margin:0 auto;padding:18px 20px 32px;text-align:center;color:#60758b;font-size:11px}.site-footer a{color:#8fcfe0;text-decoration:none}.site-footer a:hover{text-decoration:underline}
 .process .progress,.process .pipeline{display:none!important}.process .activity-log{display:block}@media print{@page{size:auto;margin:12mm}html,body,.app{width:100%!important;max-width:none!important;height:auto!important;min-height:0!important;overflow:visible!important;background:#fff!important;color:#111!important}.top,.toolbar,.player,.side,.head-actions,.glow,.site-footer,.editorError{display:none!important}.editor{display:block!important;width:100%!important;max-width:none!important;margin:0!important;padding:0!important;overflow:visible!important}.song-head{display:block!important;padding:0 0 8mm!important;border:0!important;background:#fff!important;box-shadow:none!important;color:#111!important;break-inside:avoid}.song-head h1,.song-head p,.song-head label,.capo-info{color:#111!important}.workspace{display:block!important;margin:0!important;overflow:visible!important}.lyrics{display:block!important;width:100%!important;min-height:0!important;height:auto!important;max-height:none!important;overflow:visible!important;border:0!important;background:#fff!important;box-shadow:none!important;backdrop-filter:none!important;break-inside:auto}.paper-head{height:auto!important;padding:0 0 5mm!important;color:#111!important;break-after:avoid}.lyrics-body{display:block!important;width:100%!important;min-height:0!important;height:auto!important;max-height:none!important;padding:0!important;overflow:visible!important;overscroll-behavior:auto!important;scroll-behavior:auto!important;break-inside:auto}.line,.transition-block{overflow:visible!important;break-inside:avoid!important;page-break-inside:avoid!important}.line{padding:2mm 0!important}.words{overflow:visible!important}.word{color:#111!important;font-size:16pt!important;line-height:1.4!important}.chord{color:#1c716e!important}.section,.transition-label{color:#52677b!important}.paper-foot{color:#555!important}}
-\n/* Final UI: one prominent analysis spinner, wider lyrics/chords workspace, no pipeline rows */\n.process{width:min(760px,100%);padding:48px 40px 44px;min-height:430px;display:flex;flex-direction:column;justify-content:center}
-.process .orb{width:70px;height:70px;margin:0 auto 10px;font-size:24px}
-.process .progress,.process .pipeline,.upload-circle{display:none!important}
-.upload-progress{margin:12px auto 4px;width:100%}
-.upload-progress.analyzing{display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:15px}
-.upload-progress.analyzing .analysis-spinner{display:grid!important}
-.analysis-spinner{width:190px;height:190px;border-radius:50%;border:8px solid rgba(105,209,255,.12);border-top-color:#70e2d5;border-right-color:#5fc8ff;animation:analysisSpin .9s linear infinite;box-shadow:0 0 65px rgba(75,193,255,.2);place-items:center;margin:0 auto}
-.analysis-spinner span{display:flex;flex-direction:column;align-items:center;gap:5px;animation:none!important;text-align:center}
-.analysis-spinner b{font-size:18px;color:#e7fffb}
-.analysis-spinner small{font-size:11px;color:#86a7bb;font-weight:600}
-.upload-status{max-width:620px;font-size:14px;line-height:1.8;color:#bfe0ec;min-height:28px}
-.process h2{margin:10px 0 0;font-size:29px}
-.process>p{max-width:650px;margin:7px auto 0;line-height:1.7}
+\n/* Final UI: immersive music-lab processing screen + wider lyrics/chords workspace */
+.process{width:min(920px,100%);padding:30px 34px 25px;min-height:760px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-start;background:
+ radial-gradient(circle at 50% 26%,rgba(91,221,216,.11),transparent 30%),
+ radial-gradient(circle at 12% 88%,rgba(95,168,255,.08),transparent 27%),
+ linear-gradient(160deg,rgba(9,25,42,.985),rgba(5,15,27,.99));border:1px solid rgba(132,222,233,.17);box-shadow:0 35px 120px rgba(0,0,0,.46),0 0 90px rgba(60,202,218,.08);isolation:isolate}
+.process>*{position:relative;z-index:2}
+.process-lab:before{content:"";position:absolute;inset:-35%;z-index:0;background:conic-gradient(from 180deg,transparent 0 14%,rgba(91,221,216,.055) 20%,transparent 26% 54%,rgba(96,170,255,.05) 62%,transparent 72% 100%);animation:processAmbient 16s linear infinite}
+.process-sparkles{position:absolute!important;inset:0;pointer-events:none;z-index:1!important}
+.process-sparkles i{position:absolute;width:5px;height:5px;left:var(--x);top:var(--y);border-radius:50%;background:#b8ffff;box-shadow:0 0 16px rgba(105,240,231,.8);opacity:.22;animation:processSpark 3.6s var(--d) ease-in-out infinite}
+.process-topline{display:flex;align-items:center;gap:9px;color:#7496a9;font:700 9px/1 "Space Grotesk",sans-serif;letter-spacing:.18em;text-transform:uppercase;margin-bottom:8px}
+.process-live-dot{width:7px;height:7px;border-radius:50%;background:#69e5d4;box-shadow:0 0 0 0 rgba(105,229,212,.55);animation:processLive 1.7s infinite}
+.process-topline-line{height:1px;flex:1;background:linear-gradient(90deg,rgba(116,150,169,.2),transparent)}
+.process-eq{opacity:.5}
+.process-hero{height:360px;display:grid;place-items:center;position:relative;margin-top:-2px}
+.process-core{width:210px;height:210px;position:relative;display:grid;place-items:center;border-radius:50%}
+.process-core-ring{position:absolute;inset:10px;border-radius:50%;border:1px solid rgba(138,232,235,.28);box-shadow:inset 0 0 35px rgba(81,219,215,.08),0 0 45px rgba(79,196,237,.07)}
+.process-core-note{position:relative;z-index:4;width:118px;height:118px;display:grid;place-items:center;border-radius:50%;color:#eaffff;font-size:49px;background:radial-gradient(circle at 32% 26%,#21485f,#0d2436 65%,#091b2a);border:1px solid rgba(157,243,239,.3);box-shadow:0 0 0 1px rgba(88,206,214,.06),0 0 45px rgba(71,213,217,.18),inset 0 0 28px rgba(68,186,240,.12);animation:processCoreFloat 2.6s ease-in-out infinite}
+.process-core-pulse{position:absolute;inset:20px;border-radius:50%;border:1px solid rgba(100,226,218,.35);animation:processPulse 2.4s ease-out infinite}
+.process-core-glow{position:absolute;width:100px;height:100px;border-radius:50%;background:#62d8d1;filter:blur(42px);opacity:.12;animation:processGlow 2.8s ease-in-out infinite}
+.process-orbit{position:absolute;border-radius:50%;border:1px solid rgba(118,219,231,.11);transform-origin:center;animation:processOrbit 8s linear infinite}
+.process-orbit-a{width:285px;height:285px;border-top-color:rgba(105,226,218,.65);border-right-color:rgba(105,226,218,.1)}
+.process-orbit-b{width:328px;height:328px;border-bottom-color:rgba(106,173,255,.65);border-left-color:rgba(106,173,255,.09);animation-duration:13s;animation-direction:reverse}
+.process-orbit-c{width:375px;height:375px;border-left-color:rgba(181,156,255,.35);border-bottom-color:rgba(181,156,255,.08);animation-duration:19s}
+.process-orbit:after{content:"";position:absolute;width:7px;height:7px;right:20%;top:-4px;border-radius:50%;background:#8ef2ea;box-shadow:0 0 18px #8ef2ea}
+.process-note{position:absolute;color:#9beee6;font-family:serif;font-size:27px;opacity:.72;animation:processNoteFloat 4.5s ease-in-out infinite}
+.process-note-a{left:25%;top:20%}.process-note-b{right:24%;top:28%;animation-delay:1.3s}.process-note-c{left:29%;bottom:18%;animation-delay:2.2s}
+.process-bars{position:absolute;bottom:10px;display:flex;align-items:flex-end;gap:4px;height:50px;opacity:.65}
+.process-bars i{width:4px;border-radius:5px;background:linear-gradient(180deg,#82eae3,#4d9edb);height:14px;animation:processBar .9s ease-in-out infinite alternate}
+.process-bars i:nth-child(2n){animation-delay:.18s}.process-bars i:nth-child(3n){animation-delay:.34s}.process-bars i:nth-child(4n){animation-delay:.5s}.process-bars i:nth-child(5n){animation-delay:.68s}
+.process-perimeter{position:absolute;inset:22px;border-radius:50%;border:1px dashed rgba(133,208,218,.09);animation:processPerimeter 20s linear infinite}
+.process-copy{text-align:center;margin-top:-1px}
+.process-kicker{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#68d8d0;margin-bottom:8px}
+.process-copy h2{margin:0;font-size:32px;line-height:1.18;color:#efffff;letter-spacing:-.03em}
+.process-copy p{max-width:650px;margin:10px auto 15px;color:#87a5b8;font-size:13px;line-height:1.75}
+.process-status-pill{display:inline-flex;align-items:center;justify-content:center;gap:9px;max-width:90%;padding:9px 16px;border-radius:999px;border:1px solid rgba(110,222,215,.14);background:rgba(77,182,185,.07);box-shadow:inset 0 0 25px rgba(93,222,216,.025)}
+.process-status-pill strong{font-size:12px;color:#c7f4f1;font-weight:700}
+.process-status-pulse{width:7px;height:7px;border-radius:50%;background:#6ee1d5;box-shadow:0 0 12px rgba(110,225,213,.75);animation:processLive 1.4s infinite}
+.process-steps{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:25px 0 16px}
+.process-step{position:relative;min-width:0;padding:10px 6px 9px;border-radius:13px;border:1px solid rgba(132,193,213,.11);background:rgba(255,255,255,.02);text-align:center;transition:transform .35s ease,border-color .35s ease,background .35s ease,box-shadow .35s ease}
+.process-step span{display:block;color:#506b7d;font:700 8px/1 "Space Grotesk",sans-serif;letter-spacing:.12em;margin-bottom:7px}
+.process-step b{display:block;color:#7e99aa;font-size:11px}
+.process-step small{display:block;color:#4f6879;font-size:8px;margin-top:3px}
+.process-step.active{transform:translateY(-4px);border-color:rgba(110,226,216,.4);background:linear-gradient(180deg,rgba(88,218,209,.11),rgba(91,174,224,.035));box-shadow:0 12px 35px rgba(63,204,211,.08),inset 0 0 24px rgba(82,215,207,.03)}
+.process-step.active span,.process-step.active b{color:#c6fff7}
+.process-step.active small{color:#75b7bd}
+.process-step.done{border-color:rgba(111,212,195,.18)}
+.process-step.done span{color:#5ed7cc}
+.process-bottom{text-align:center}
+.process-wave{height:28px;display:flex;align-items:center;justify-content:center;gap:3px;margin:0 auto 10px;opacity:.65}
+.process-wave i{width:3px;border-radius:4px;background:linear-gradient(180deg,#79e6df,#5697cf);height:7px;animation:processBar 1.1s ease-in-out infinite alternate}
+.process-wave i:nth-child(2n){animation-delay:.11s}.process-wave i:nth-child(3n){animation-delay:.22s}.process-wave i:nth-child(4n){animation-delay:.33s}
+.processing-note{max-width:520px;margin:0 auto;color:#607b8f;text-align:center;font-size:10px;line-height:1.6}.processing-note span{color:#66d8d2}
+.upload-progress{position:absolute!important;left:-99999px!important;width:1px!important;height:1px!important;overflow:hidden!important}
+.upload-progress.analyzing .analysis-spinner{display:none!important}
+.analysis-spinner{display:none!important}
+@keyframes processAmbient{to{transform:rotate(360deg)}}@keyframes processSpark{0%,100%{transform:translateY(0) scale(.7);opacity:.16}50%{transform:translateY(-13px) scale(1.15);opacity:.65}}@keyframes processLive{0%{box-shadow:0 0 0 0 rgba(105,229,212,.5)}70%{box-shadow:0 0 0 9px rgba(105,229,212,0)}100%{box-shadow:0 0 0 0 rgba(105,229,212,0)}}@keyframes processCoreFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-5px) rotate(2deg)}}@keyframes processPulse{0%{transform:scale(.72);opacity:.65}100%{transform:scale(1.35);opacity:0}}@keyframes processGlow{0%,100%{transform:scale(.8);opacity:.08}50%{transform:scale(1.35);opacity:.16}}@keyframes processOrbit{to{transform:rotate(360deg)}}@keyframes processNoteFloat{0%,100%{transform:translate3d(0,0,0) rotate(-7deg);opacity:.45}50%{transform:translate3d(0,-13px,0) rotate(8deg);opacity:.9}}@keyframes processBar{from{height:7px;opacity:.35}to{height:34px;opacity:1}}@keyframes processPerimeter{to{transform:rotate(360deg)}}
+
 .editor{max-width:1800px}
 .workspace{grid-template-columns:minmax(0,1fr) 215px;gap:12px}
 .lyrics{min-height:1400px;width:100%}
 .lyrics-body{padding:64px 82px;min-height:1800px;max-height:none}
 .word{font-size:64px;line-height:1.4}
 .chord{font-size:33px;height:50px}
-@media(max-width:1100px){.workspace{grid-template-columns:minmax(0,1fr) 195px}.lyrics-body{padding:52px 52px}.word{font-size:56px}.chord{font-size:30px}}
-@media(max-width:900px){.workspace{grid-template-columns:minmax(0,1fr)}.lyrics-body{padding:38px 30px;min-height:1200px}}
-@media(max-width:650px){.process{padding:34px 18px;min-height:390px}.analysis-spinner{width:155px;height:155px}.analysis-spinner b{font-size:15px}.upload-status{font-size:12px}.process h2{font-size:23px}.workspace{grid-template-columns:minmax(0,1fr)}.lyrics-body{padding:30px 16px;min-height:1000px;max-height:none;overflow:visible}.word{font-size:34px}.chord{font-size:21px;height:32px}}\n
+@media(max-width:1100px){.workspace{grid-template-columns:minmax(0,1fr) 195px;gap:10px}.process{padding:26px 22px;min-height:720px}.process-hero{height:325px}.process-orbit-a{width:255px;height:255px}.process-orbit-b{width:292px;height:292px}.process-orbit-c{width:330px;height:330px}.process-steps{gap:6px}}
+@media(max-width:900px){.workspace{grid-template-columns:minmax(0,1fr)}.lyrics-body{padding:38px 30px;min-height:1200px}.process{min-height:680px}.process-hero{height:285px}.process-copy h2{font-size:28px}.process-steps{grid-template-columns:repeat(3,1fr);row-gap:7px}}
+@media(max-width:650px){.process{padding:18px 14px 20px;min-height:610px;border-radius:20px}.process-topline{font-size:7px}.process-hero{height:250px}.process-core{width:165px;height:165px}.process-core-note{width:92px;height:92px;font-size:38px}.process-orbit-a{width:205px;height:205px}.process-orbit-b{width:238px;height:238px}.process-orbit-c{width:270px;height:270px}.process-note-a{left:18%;top:17%}.process-note-b{right:17%;top:22%}.process-note-c{left:22%;bottom:12%}.process-copy h2{font-size:23px}.process-copy p{font-size:11px;margin-top:8px}.process-status-pill{padding:8px 12px}.process-status-pill strong{font-size:10px}.process-steps{grid-template-columns:repeat(3,1fr);margin-top:18px}.process-step{padding:8px 4px}.process-step b{font-size:10px}.process-step small{font-size:7px}.process-wave{margin-top:2px}.workspace{grid-template-columns:minmax(0,1fr)}.lyrics-body{padding:30px 16px;min-height:1000px;max-height:none;overflow:visible}.word{font-size:34px}.chord{font-size:21px;height:32px}}
 /* Visual settings + chord dictionary */
 :root{--ui-accent:#67d8d2;--ui-accent-2:#64c8ff}
 body[data-accent="purple"]{--ui-accent:#b79cff;--ui-accent-2:#7f8cff}
@@ -279,17 +323,55 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 </section>
 
 <section id="processing" class="center hidden">
-<div class="card process">
-<div class="orb">♫</div>
-<div class="upload-progress analyzing" id="uploadProgress">
-  <div class="analysis-spinner" id="analysisSpinner" aria-live="polite">
-    <span><b>בודקים את הקובץ…</b><small>מילים · אקורדים · תזמון</small></span>
+<div class="card process process-lab">
+  <div class="process-sparkles" aria-hidden="true">
+    <i style="--x:8%;--y:18%;--d:0s"></i><i style="--x:91%;--y:24%;--d:.8s"></i><i style="--x:16%;--y:78%;--d:1.4s"></i><i style="--x:82%;--y:78%;--d:2.1s"></i><i style="--x:49%;--y:8%;--d:2.8s"></i>
   </div>
-  <div class="upload-status" id="uploadStatus" aria-live="polite">מתחילים לבדוק ולתמלל את השיר…</div>
-</div>
-<h2>בודקים את הקובץ ומתמללים</h2>
-<p>המנועים עובדים עכשיו על האודיו: בודקים את הקובץ, מתמללים את המילים, מזהים את האקורדים ומחברים הכול לתזמון.</p>
-<div class="processing-note">השיר נבדק ברקע. בסיום ייפתח דף הנגינה.</div><div class="activity-log hidden admin-full-log" id="activityLog"><div class="activity-head"><strong>יומן פעולות מלא · מנהל בלבד</strong><span id="activityState">ממתין להתחלה</span></div><div id="activityEvents" class="activity-events"><div class="activity-empty">ממתין לאירועי שרת…</div></div></div>
+  <div class="process-topline"><span class="process-live-dot"></span><span>CHORD STUDIO · LIVE ANALYSIS</span><span class="process-topline-line"></span><span class="process-eq">01 / ∞</span></div>
+
+  <div class="process-hero">
+    <div class="process-orbit process-orbit-a" aria-hidden="true"></div>
+    <div class="process-orbit process-orbit-b" aria-hidden="true"></div>
+    <div class="process-orbit process-orbit-c" aria-hidden="true"></div>
+    <div class="process-core" aria-hidden="true">
+      <div class="process-core-ring"></div>
+      <div class="process-core-note">♫</div>
+      <div class="process-core-pulse"></div>
+      <div class="process-core-glow"></div>
+    </div>
+    <div class="process-note process-note-a" aria-hidden="true">♪</div>
+    <div class="process-note process-note-b" aria-hidden="true">♬</div>
+    <div class="process-note process-note-c" aria-hidden="true">𝄞</div>
+    <div class="process-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="process-perimeter" aria-hidden="true"></div>
+  </div>
+
+  <div class="process-copy">
+    <div class="process-kicker">המעבדה המוזיקלית עובדת עכשיו</div>
+    <h2 id="processingTitle">הופכים את השיר לדף נגינה</h2>
+    <p id="processingSubtitle">אנחנו מאזינים לכל השיר, בודקים את המילים, מזהים את האקורדים ומחברים הכול לתזמון מדויק.</p>
+    <div class="process-status-pill"><span class="process-status-pulse"></span><strong id="uploadStatus" aria-live="polite">מתחילים לבדוק ולתמלל את השיר…</strong></div>
+  </div>
+
+  <div class="process-steps" aria-label="שלבי עיבוד השיר">
+    <div class="process-step" data-process-step="file"><span>01</span><b>קובץ</b><small>בדיקה</small></div>
+    <div class="process-step" data-process-step="listen"><span>02</span><b>האזנה</b><small>אודיו</small></div>
+    <div class="process-step" data-process-step="lyrics"><span>03</span><b>מילים</b><small>תמלול</small></div>
+    <div class="process-step" data-process-step="chords"><span>04</span><b>אקורדים</b><small>Chordino</small></div>
+    <div class="process-step" data-process-step="sync"><span>05</span><b>סנכרון</b><small>תזמון</small></div>
+    <div class="process-step" data-process-step="ready"><span>06</span><b>דף נגינה</b><small>בנוי</small></div>
+  </div>
+
+  <div class="process-bottom">
+    <div class="process-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="processing-note"><span>✦</span> השיר נבדק לכל אורכו. בסיום דף הנגינה ייפתח אוטומטית.</div>
+  </div>
+
+  <div class="upload-progress analyzing" id="uploadProgress" aria-hidden="true">
+    <div class="analysis-spinner" id="analysisSpinner"><span><b>LIVE</b><small>processing</small></span></div>
+  </div>
+
+  <div class="activity-log hidden admin-full-log" id="activityLog"><div class="activity-head"><strong>יומן פעולות מלא · מנהל בלבד</strong><span id="activityState">ממתין להתחלה</span></div><div id="activityEvents" class="activity-events"><div class="activity-empty">ממתין לאירועי שרת…</div></div></div>
 </div>
 </section>
 
@@ -626,7 +708,22 @@ var quotaTimer = null;
 var analysisMessageTimer = null;
 var analysisMessages=["בודקים את תקינות הקובץ…","קוראים את האודיו ומכינים אותו לניתוח…","מנוע האקורדים מזהה שינויים והרמוניה…","Gemini מתמלל את מילות השיר…","מסדרים את המילים לפי בתים ופזמון…","מחברים את המילים לתזמון האקורדים…","בונים את דף המילים והאקורדים…"];
 var analysisMessageIndex=0;
-function startAnalysisMessages(){var wrap=document.getElementById("uploadProgress"),spinner=document.getElementById("analysisSpinner"),status=document.getElementById("uploadStatus");if(!wrap)return;wrap.classList.add("analyzing");if(spinner)spinner.classList.remove("hidden");if(status&&!analysisMessageTimer){analysisMessageIndex=0;status.textContent=analysisMessages[0];analysisMessageTimer=setInterval(function(){analysisMessageIndex=(analysisMessageIndex+1)%analysisMessages.length;status.textContent=analysisMessages[analysisMessageIndex];},3000);}}function stopAnalysisMessages(){if(analysisMessageTimer){clearInterval(analysisMessageTimer);analysisMessageTimer=null;}var wrap=document.getElementById("uploadProgress"),spinner=document.getElementById("analysisSpinner");if(wrap)wrap.classList.remove("analyzing");if(spinner)spinner.classList.add("hidden");}
+function updateProcessingVisual(message){
+  var text=String(message||"").toLowerCase(),stage="listen";
+  if(/match|התאמה|מצאנו שיר|חיפוש/.test(text))stage="file";
+  else if(/קובץ|העלא|בדוק/.test(text))stage="file";
+  else if(/מיל|transcrib|תמלל|תמלול/.test(text))stage="lyrics";
+  else if(/אקורד|chordino|harmon|מנוע/.test(text))stage="chords";
+  else if(/סנכר|תזמ|מחבר|מסדר/.test(text))stage="sync";
+  else if(/בונה|דף|מוכן|הושלם/.test(text))stage="ready";
+  var order=["file","listen","lyrics","chords","sync","ready"],current=order.indexOf(stage);if(current<0)current=1;
+  document.querySelectorAll(".process-step").forEach(function(el){
+    var idx=order.indexOf(el.getAttribute("data-process-step"));
+    el.classList.toggle("active",idx===current);el.classList.toggle("done",idx>=0&&idx<current);
+  });
+}
+
+function startAnalysisMessages(){var wrap=document.getElementById("uploadProgress"),spinner=document.getElementById("analysisSpinner"),status=document.getElementById("uploadStatus");if(!wrap)return;wrap.classList.add("analyzing");if(spinner)spinner.classList.remove("hidden");if(status&&!analysisMessageTimer){analysisMessageIndex=0;status.textContent=analysisMessages[0];updateProcessingVisual(analysisMessages[0]);analysisMessageTimer=setInterval(function(){analysisMessageIndex=(analysisMessageIndex+1)%analysisMessages.length;status.textContent=analysisMessages[analysisMessageIndex];updateProcessingVisual(analysisMessages[analysisMessageIndex]);},3000);}}function stopAnalysisMessages(){if(analysisMessageTimer){clearInterval(analysisMessageTimer);analysisMessageTimer=null;}var wrap=document.getElementById("uploadProgress"),spinner=document.getElementById("analysisSpinner");if(wrap)wrap.classList.remove("analyzing");if(spinner)spinner.classList.add("hidden");}
 var audio = document.getElementById("audio");
 
 var DEMO = {
@@ -671,7 +768,7 @@ drop.addEventListener("dragleave",function(){drop.classList.remove("hot")});
 drop.addEventListener("drop",function(e){e.preventDefault();drop.classList.remove("hot");if(!canUploadNewSong()){setError("homeError",uploadGateReason());updateUploadGate();return;}pickFile(e.dataTransfer.files[0])});
 
 function updateProgress(v){document.getElementById("progressBar").style.width=v+"%";["p1","p2","p3","p4","p5"].forEach(function(id,i){var el=document.getElementById(id);if(v>i*18+8){el.classList.add("on");el.querySelector("b").textContent="✓"}else{el.classList.remove("on");el.querySelector("b").textContent="○"}})}
-function setUploadProgress(percent,status){if(status){var el=document.getElementById("uploadStatus");if(el)el.textContent=status;}startAnalysisMessages()}
+function setUploadProgress(percent,status){if(status){var el=document.getElementById("uploadStatus");if(el)el.textContent=status;updateProcessingVisual(status)}startAnalysisMessages()}
 function addActivityEvent(ev){var box=document.getElementById("activityEvents");var empty=box.querySelector(".activity-empty");if(empty)empty.remove();var row=document.createElement("div");row.className="activity-event "+(ev.level||"info");var dot=document.createElement("i");dot.className="activity-dot";var time=document.createElement("span");time.className="activity-time";time.textContent=new Date(ev.time).toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit",second:"2-digit"});var msg=document.createElement("span");msg.className="activity-message";msg.textContent=ev.message;row.append(dot,time,msg);box.appendChild(row);box.scrollTop=box.scrollHeight;document.getElementById("activityState").textContent=ev.level==="error"?"נכשלה":ev.stage==="completed"?"הושלם":"בתהליך"}
 var sidebarImages=[];
 function addSidebarImages(files){
