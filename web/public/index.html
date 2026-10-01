@@ -203,7 +203,7 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 </section>
 </div></aside>
 </div>
-<div id="authModal" class="account-modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" onclick="if(event.target===this)closeAuth()"><div class="account-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="authTitle">כניסה לחשבון</h2><button class="ghost" style="flex:0 0 auto" onclick="closeAuth()">✕</button></div><p id="authIntro">התחבר באמצעות Google או אימייל וסיסמה</p><div class="auth-tabs"><button id="loginTab" class="secondary" onclick="setAuthMode('login')">כניסה</button><button id="registerTab" class="secondary" onclick="setAuthMode('register')">הרשמה</button></div><form id="authForm" onsubmit="submitAuth(event)"><div id="registerNameWrap" class="hidden"><label for="authName">שם מלא</label><input id="authName" autocomplete="name" maxlength="80" placeholder="איך קוראים לך?"></div><div id="registerInstrumentWrap" class="hidden auth-instrument"><label for="authInstrument">באיזה כלי אתה מנגן?</label><select id="authInstrument"><option value="guitar">🎸 גיטרה</option><option value="organ">🎹 אורגן</option></select></div><label for="authEmail">כתובת אימייל</label><input id="authEmail" type="email" autocomplete="email" required placeholder="name@example.com"><label for="authPassword">סיסמה</label><input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="לפחות 8 תווים"><div id="authError" class="auth-error"></div><button id="authSubmit" class="primary" type="submit" style="width:100%">כניסה</button></form><div style="text-align:center;margin:15px 0;color:#71879c;font-size:11px">או</div><button class="secondary" style="width:100%" onclick="location.href='/auth/google'">G&nbsp; המשך עם Google</button></div></div>
+<div id="authModal" class="account-modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle" onclick="if(event.target===this)closeAuth()"><div class="account-dialog"><div class="auth-actions" style="justify-content:space-between"><h2 id="authTitle">כניסה לחשבון</h2><button class="ghost" style="flex:0 0 auto" onclick="closeAuth()">✕</button></div><p id="authIntro">התחבר באמצעות Google או אימייל וסיסמה</p><div class="auth-tabs"><button id="loginTab" class="secondary" onclick="setAuthMode('login')">כניסה</button><button id="registerTab" class="secondary" onclick="setAuthMode('register')">הרשמה</button></div><form id="authForm" novalidate onsubmit="submitAuth(event)"><div id="registerNameWrap" class="hidden"><label for="authName">שם מלא</label><input id="authName" autocomplete="name" maxlength="80" placeholder="איך קוראים לך?"></div><div id="registerInstrumentWrap" class="hidden auth-instrument"><label for="authInstrument">באיזה כלי אתה מנגן?</label><select id="authInstrument"><option value="guitar">🎸 גיטרה</option><option value="organ">🎹 אורגן</option></select></div><label for="authEmail">כתובת אימייל</label><input id="authEmail" type="email" autocomplete="email" required placeholder="name@example.com"><label for="authPassword">סיסמה</label><input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="לפחות 8 תווים"><div id="authError" class="auth-error"></div><button id="authSubmit" class="primary" type="submit" style="width:100%">כניסה</button></form><div style="text-align:center;margin:15px 0;color:#71879c;font-size:11px">או</div><button class="secondary" style="width:100%" onclick="location.href='/auth/google'">G&nbsp; המשך עם Google</button></div></div>
 <div id="mySongsModal" class="my-songs-modal hidden" role="dialog" aria-modal="true" onclick="if(event.target===this)closeMySongs()"><div class="my-songs-dialog"><div class="auth-actions" style="justify-content:space-between"><div><h2 style="margin:0">🎵 השירים שלי</h2><p style="margin:4px 0 0;color:#7f95aa;font-size:11px">כל השירים והניתוחים שנשמרו אוטומטית בחשבון</p></div><button class="ghost" type="button" onclick="closeMySongs()">✕</button></div><div id="mySongsList" class="saved-song-list"><div class="activity-empty">טוען את השירים…</div></div></div></div>
 <div id="developerMessageModal" class="developer-message-modal hidden" role="dialog" aria-modal="true" aria-labelledby="developerMessageTitle" onclick="if(event.target===this)closeDeveloperMessage()">
   <div class="developer-message-dialog">
@@ -853,7 +853,53 @@ function openAuth(mode){setAuthMode(mode||"login");document.getElementById("auth
 function closeAuth(){document.getElementById("authModal").classList.add("hidden");}
 function openAccount(){if(accountState.authenticated){var u=accountState.user||{};document.getElementById("authTitle").textContent="החשבון שלי";document.getElementById("authIntro").textContent=(u.name||"")+" · "+(u.email||"");document.getElementById("authForm").classList.add("hidden");document.querySelector(".auth-tabs").classList.add("hidden");document.getElementById("authError").textContent="";document.getElementById("authModal").classList.remove("hidden");}else openAuth("login");}
 function setAuthMode(mode){authMode=mode==="register"?"register":"login";document.getElementById("authTitle").textContent=authMode==="register"?"יצירת חשבון":"כניסה לחשבון";document.getElementById("authIntro").textContent=authMode==="register"?"מלא את הפרטים כדי ליצור חשבון חדש":"התחבר באמצעות אימייל וסיסמה או Google";document.getElementById("registerNameWrap").classList.toggle("hidden",authMode!=="register");document.getElementById("registerInstrumentWrap").classList.toggle("hidden",authMode!=="register");document.getElementById("authName").required=authMode==="register";document.getElementById("authInstrument").required=authMode==="register";if(authMode==="register")document.getElementById("authInstrument").value=getInstrument();document.getElementById("authPassword").autocomplete=authMode==="register"?"new-password":"current-password";document.getElementById("authSubmit").textContent=authMode==="register"?"הרשמה":"כניסה";document.getElementById("authForm").classList.remove("hidden");document.querySelector(".auth-tabs").classList.remove("hidden");document.getElementById("loginTab").classList.toggle("sel",authMode==="login");document.getElementById("registerTab").classList.toggle("sel",authMode==="register");document.getElementById("authError").textContent="";}
-async function submitAuth(event){event.preventDefault();var button=document.getElementById("authSubmit"),error=document.getElementById("authError");button.disabled=true;error.textContent="";try{var body={email:document.getElementById("authEmail").value,password:document.getElementById("authPassword").value};if(authMode==="register"){body.name=document.getElementById("authName").value;body.instrument=document.getElementById("authInstrument").value;setInstrument(body.instrument);}var r=await fetch(authMode==="register"?"/api/auth/register":"/api/auth/login",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),data=await r.json().catch(function(){return{}});if(!r.ok)throw new Error(data.error||"הפעולה נכשלה");closeAuth();document.getElementById("authForm").reset();await loadAccountState();if(authMode==="register"&&!currentApiKey())showApiOnboarding();}catch(e){error.textContent=e.message||"לא ניתן להשלים את הפעולה"}finally{button.disabled=false;}}
+function validateAuthForm(){
+  var email=String(document.getElementById("authEmail").value||"").trim();
+  var password=String(document.getElementById("authPassword").value||"");
+  var name=String(document.getElementById("authName").value||"").trim();
+  if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return "הזן כתובת אימייל תקינה";
+  if(!password)return "יש להזין סיסמה";
+  if(password.length<8)return "הסיסמה חייבת להכיל לפחות 8 תווים";
+  if(password.length>200)return "הסיסמה ארוכה מדי";
+  if(authMode==="register"&&(name.length<2||name.length>80))return "השם חייב להכיל בין 2 ל־80 תווים";
+  return "";
+}
+async function submitAuth(event){
+  event.preventDefault();
+  var button=document.getElementById("authSubmit"),error=document.getElementById("authError");
+  button.disabled=true;
+  error.textContent="";
+  try{
+    var validationError=validateAuthForm();
+    if(validationError){error.textContent=validationError;return;}
+    var body={
+      email:String(document.getElementById("authEmail").value||"").trim(),
+      password:String(document.getElementById("authPassword").value||"")
+    };
+    if(authMode==="register"){
+      body.name=String(document.getElementById("authName").value||"").trim();
+      body.instrument=document.getElementById("authInstrument").value;
+      setInstrument(body.instrument);
+    }
+    var r=await fetch(authMode==="register"?"/api/auth/register":"/api/auth/login",{
+      method:"POST",
+      credentials:"same-origin",
+      cache:"no-store",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
+    var data=await r.json().catch(function(){return{}});
+    if(!r.ok)throw new Error(data.error||"הפעולה נכשלה");
+    closeAuth();
+    document.getElementById("authForm").reset();
+    await loadAccountState();
+    if(authMode==="register"&&!currentApiKey())showApiOnboarding();
+  }catch(e){
+    error.textContent=e.message||"לא ניתן להשלים את הפעולה";
+  }finally{
+    button.disabled=false;
+  }
+}
 async function loadAccountState(){
  try{
    var r=await fetch("/api/auth/me",{cache:"no-store",credentials:"same-origin"});if(!r.ok)throw new Error("בדיקת החשבון נכשלה");
