@@ -1,0 +1,13 @@
+name: Chordino keepalive
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping-chordino:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep Chordino awake
+        run: curl --fail --silent --show-error --max-time 20 https://chord-studio-local-engine-chordino.onrender.com/health
