@@ -1067,91 +1067,16 @@ async function getAudioDurationSeconds(filePath){
 }
 
 async function analyzeChordinoInChunks(filePath,originalName,mimeType,operationIdValue){
-  const totalDuration=await getAudioDurationSeconds(filePath);
-  if(!totalDuration||totalDuration<=CHORDINO_CHUNK_SECONDS){
-    const result=await analyzeWithChordino(filePath,originalName,mimeType,operationIdValue);
-    return {duration:Math.max(totalDuration,Number(result&&result.duration)||0),chords:result&&Array.isArray(result.chords)?result.chords:[],chunkCount:1};
-  }
-
-  const step=Math.max(1,CHORDINO_CHUNK_SECONDS-CHORDINO_CHUNK_OVERLAP_SECONDS);
-  const chunkPlans=[];
-  for(let coreStart=0;coreStart<totalDuration;coreStart+=step){
-    const coreEnd=Math.min(totalDuration,coreStart+step);
-    const inputStart=Math.max(0,coreStart-CHORDINO_CHUNK_OVERLAP_SECONDS);
-    const inputEnd=Math.min(totalDuration,coreEnd+CHORDINO_CHUNK_OVERLAP_SECONDS);
-    chunkPlans.push({index:chunkPlans.length,coreStart,coreEnd,inputStart,inputEnd});
-    if(coreEnd>=totalDuration-0.001)break;
-  }
-
-  const merged=[];
-  logOperation(operationIdValue,"chordino_chunking_started","האודיו חולק לליבות של "+CHORDINO_CHUNK_SECONDS+" שניות עם חפיפה של "+CHORDINO_CHUNK_OVERLAP_SECONDS+" שניות; כל מקטע ממופה מחדש לציר הזמן המקורי לפני האיחוד");
-
-  for(const plan of chunkPlans){
-    const chunkPath=path.join(uploadDir,"chordino-"+operationIdValue+"-"+plan.index+"-"+crypto.randomBytes(5).toString("hex")+".wav");
-    try{
-      const seconds=Math.max(0.1,plan.inputEnd-plan.inputStart);
-      logOperation(operationIdValue,"chordino_chunk_started","מקטע "+(plan.index+1)+"/"+chunkPlans.length+" · זמן "+plan.inputStart.toFixed(2)+"–"+plan.inputEnd.toFixed(2)+" שניות");
-      await execFileAsync(ffmpegPath,[
-        "-y","-hide_banner","-loglevel","error",
-        "-ss",String(plan.inputStart),
-        "-i",filePath,
-        "-t",String(seconds),
-        "-vn",
-        "-ar",String(CHORDINO_CHUNK_SAMPLE_RATE),
-        "-ac","1",
-        "-c:a","pcm_s16le",
-        chunkPath
-      ],{maxBuffer:4*1024*1024});
-
-      const chunkName=(String(originalName||"audio")+".chunk"+plan.index+".wav");
-      const chunkResult=await analyzeWithChordino(chunkPath,chunkName,"audio/wav",operationIdValue);
-      const localDuration=Math.max(0,Number(chunkResult&&chunkResult.duration)||seconds);
-      const shifted=(Array.isArray(chunkResult&&chunkResult.chords)?chunkResult.chords:[]).map(function(chord){
-        return {
-          start:Math.max(0,Number(chord&&chord.start||0)+plan.inputStart),
-          end:Math.min(totalDuration,Number(chord&&chord.end||0)+plan.inputStart),
-          chord:String(chord&&chord.chord||"").trim(),
-          confidence:Math.max(0,Math.min(1,Number(chord&&chord.confidence)||0.8)),
-          chunk:plan.index
-        };
-      }).filter(function(chord){
-        return chord.chord&&chord.end>chord.start;
-      });
-
-      const coreEvents=shifted.filter(function(chord){
-        return chord.start>=plan.coreStart-0.02 && chord.start<plan.coreEnd-0.02;
-      });
-      merged.push.apply(merged,coreEvents);
-      logOperation(operationIdValue,"chordino_chunk_completed","מקטע "+(plan.index+1)+"/"+chunkPlans.length+" הושלם · "+coreEvents.length+" אירועי אקורד נשמרו · משך מנוע "+localDuration.toFixed(2)+" שניות");
-    }catch(error){
-      logOperation(operationIdValue,"chordino_chunk_failed","מקטע "+(plan.index+1)+"/"+chunkPlans.length+" נכשל: "+String(error&&error.message||error).slice(0,350),"error");
-      throw error;
-    }finally{
-      try{await fs.unlink(chunkPath);}catch{}
-    }
-  }
-
-  const chords=collapseAdjacentChordEvents(merged,0.35)
-    .map(function(chord){
-      return {
-        start:Math.max(0,Math.min(totalDuration,Number(chord.start)||0)),
-        end:Math.max(0,Math.min(totalDuration,Number(chord.end)||0)),
-        chord:String(chord.chord||"").trim(),
-        confidence:Math.max(0,Math.min(1,Number(chord.confidence)||0.8))
-      };
-    })
-    .filter(function(chord){return chord.chord&&chord.end>chord.start;})
-    .sort(function(a,b){return a.start-b.start;});
-  for(let i=0;i<chords.length;i+=1){
-    const next=chords[i+1];
-    if(next&&next.start>chords[i].start)chords[i].end=Math.min(chords[i].end,next.start);
-    if(i===chords.length-1)chords[i].end=Math.min(totalDuration,chords[i].end);
-  }
-  const timeline=chords.filter(function(chord){return chord.end>chord.start;});
-
-  if(!timeline.length)throw new Error("Chordino המפוצל לא החזיר אירועי אקורד");
-  logOperation(operationIdValue,"chordino_chunking_completed","כל המקטעים סונכרנו לציר הזמן המקורי: "+timeline.length+" אירועי אקורד על פני "+totalDuration.toFixed(2)+" שניות");
-  return {duration:totalDuration,chords:timeline,chunkCount:chunkPlans.length};
+  // Send the ENTIRE song to Chordino in one request.
+  // Do not split the recording: multiple chunk requests can exhaust the
+  // external engine quota and can create boundary artifacts.
+  logOperation(operationIdValue,"chordino_single_pass","שולחים את כל השיר בשלמותו ל-Chordino בבקשה אחת; ללא חלוקה למקטעים. הבדיקה מכסה את כל ציר הזמן, כולל אמצע וסיום.");
+  const result=await analyzeWithChordino(filePath,originalName,mimeType,operationIdValue);
+  const duration=Math.max(0,Number(result&&result.duration)||await getAudioDurationSeconds(filePath));
+  const chords=Array.isArray(result&&result.chords)?result.chords:[];
+  if(!chords.length)throw new Error("Chordino בניתוח מלא לא החזיר אירועי אקורד");
+  logOperation(operationIdValue,"chordino_single_pass_completed","Chordino השלים ניתוח מלא של כל השיר בבקשה אחת: "+chords.length+" אירועי אקורד על פני "+duration.toFixed(2)+" שניות");
+  return {duration:duration,chords:chords,chunkCount:1};
 }
 
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
@@ -1268,7 +1193,7 @@ app.post("/api/analyze",async function(req,res){
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
 
     currentStage="evidence_collection";
-    logOperation(req.operationId,"evidence_collection_started","מריצים תמלול Gemini מלא ובמקביל Chordino מחולק למקטעים עם חפיפה וסנכרון לציר הזמן המקורי");
+    logOperation(req.operationId,"evidence_collection_started","מריצים תמלול Gemini מלא ובמקביל Chordino על כל השיר בבקשה אחת, ללא חלוקה למקטעים");
     const evidence=await Promise.all([
       transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
       analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId)
@@ -1286,7 +1211,7 @@ app.post("/api/analyze",async function(req,res){
       "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n"+
       JSON.stringify({source:"Chordino via Sonic Annotator",duration:chordino.duration,chords:chordino.chords})+
       "\n\nMUSICAL CONTEXT RULES:\n"+
-      "Use the Chordino chord sequence as the primary evidence for the song's tonal center and likely major/minor key. Use that key context to interpret lyric timing and metadata, but do not invent, delete, rename, simplify, or move any chord from the Chordino timeline. Preserve chord qualities exactly as detected by the configured Chordino transform.";
+      "Use the Chordino chord sequence as the primary and authoritative evidence for every chord. Check the ENTIRE timeline carefully from beginning to end, with EXTRA attention to chord changes in the middle and especially the final third and ending of the song; do not stop relying on evidence after the opening section. Use the overall chord movement to establish the tonal center and likely major/minor key. Do not invent, delete, rename, simplify, duplicate, move, or extrapolate chords beyond what the Chordino timeline provides. Preserve chord qualities and timestamps exactly as detected by Chordino. When reconciling lyrics and chords, keep later-section chord changes fully represented rather than defaulting to chords from the beginning.";
     const finalAnalysis=cleanAnalysis(await analyzeWithGemini(req.auth.apiKey,audioBase64,mimeType,reconciliationPrompt,req.operationId,"final_reconciliation"));
     if(!(finalAnalysis.lines||[]).length)throw new Error("הניתוח הסופי של Gemini לא החזיר תמלול");
     // Chordino is the authoritative chord detector. Gemini contributes lyrics,
@@ -1306,7 +1231,7 @@ app.post("/api/analyze",async function(req,res){
     // Never repeat the same sustained chord above every following word.
     placeChordAnchors(finalAnalysis.lines,finalAnalysis.chords);
     if(!finalAnalysis.chords.length)throw new Error("Chordino לא סיפק ציר אקורדים תקין");
-    logOperation(req.operationId,"final_reconciliation_completed","התמלול והמטא-נתונים הושלמו; ציר האקורדים הסופי נלקח מ-Chordino המפוצל והמסונכרן: "+(chordino.chunkCount||1)+" מקטעים, "+(finalAnalysis.lines||[]).length+" שורות, "+finalAnalysis.chords.length+" אקורדים");
+    logOperation(req.operationId,"final_reconciliation_completed","התמלול והמטא-נתונים הושלמו; ציר האקורדים הסופי נלקח מ-Chordino בניתוח מלא: "+(chordino.chunkCount||1)+" מקטעים, "+(finalAnalysis.lines||[]).length+" שורות, "+finalAnalysis.chords.length+" אקורדים");
 
     currentStage="history_save";
     let historyId="",savedAudioPath="";
@@ -1341,7 +1266,7 @@ app.post("/api/analyze",async function(req,res){
     }
 
     currentStage="response";
-    logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה סופית לדפדפן; משך כולל "+(Date.now()-startedAt)+"ms","success");
+    logOperation(req.operationId,"completed","הניתוח הושלם ונשלחת תוצאה סופית לדפדפן; Chordino פעל בבקשה אחת על כל השיר; משך כולל "+(Date.now()-startedAt)+"ms","success");
     res.json({analysis:finalAnalysis,verificationAvailable:true,operationId:req.operationId,historyId:historyId,audioSaved:Boolean(savedAudioPath),dailyRemaining:quotaStatus?quotaStatus.remaining:null,dailyResetAt:quotaStatus?quotaStatus.resetAt:null,weeklyRemaining:quotaStatus?quotaStatus.remaining:null,weeklyResetAt:quotaStatus?quotaStatus.resetAt:null});
    }catch(error){
     if(usageReservation)await releaseDailyUsage(accountIdForUser(req.auth.session.user),usageReservation.reservationKey);
