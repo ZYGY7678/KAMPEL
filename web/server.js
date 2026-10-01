@@ -579,8 +579,110 @@ app.get("/api/health",function(_req,res){res.json({
 
 app.get("/auth/google",function(_req,res){if(!requireGoogleOAuth(res))return;const state=crypto.randomBytes(24).toString("hex");oauthStates.set(state,Date.now());const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:APP_URL+"/auth/google/callback",response_type:"code",scope:OAUTH_SCOPES,state:state});res.redirect("https://accounts.google.com/o/oauth2/v2/auth?"+params.toString());});
 app.get("/auth/google/callback",async function(req,res){const state=String(req.query.state||""),code=String(req.query.code||""),created=oauthStates.get(state);oauthStates.delete(state);if(!created||Date.now()-created>10*60*1000||!code)return res.status(400).send("Google authentication state expired or invalid");try{const tokenRes=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:code,client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:APP_URL+"/auth/google/callback",grant_type:"authorization_code"})}),tokens=await tokenRes.json();if(!tokenRes.ok||!tokens.access_token)throw new Error(tokens.error_description||"Google token exchange failed");const userRes=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+tokens.access_token}}),user=await userRes.json();if(!userRes.ok||!user.sub||user.email_verified!==true)throw new Error("Google user info failed or email is not verified");const sessionId=crypto.randomBytes(32).toString("hex"),userData={id:String(user.sub),name:user.name||user.email||"Google user",email:normalizeEmail(user.email),picture:user.picture||""};if(supabaseReady()){const accountId=await ensureAccount(userData);userData.accountId=accountId;await sb("auth_sessions","POST",{token_hash:tokenHash(sessionId),account_id:accountId,expires_at:new Date(Date.now()+2592000000).toISOString()});}else{sessions.set(sessionId,{user:userData,premium:false,premiumCheckedAt:0,createdAt:Date.now()});}setSessionCookie(res,sessionId);res.redirect("/");}catch(error){console.error(error);res.status(500).send("Google authentication failed");}});
-app.post("/api/auth/register",async function(req,res){const name=String(req.body&&req.body.name||"").trim(),email=normalizeEmail(req.body&&req.body.email),password=String(req.body&&req.body.password||"");if(name.length<2||name.length>80)return res.status(400).json({error:"השם חייב להכיל בין 2 ל־80 תווים"});if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return res.status(400).json({error:"כתובת אימייל לא תקינה"});if(password.length<8||password.length>200)return res.status(400).json({error:"הסיסמה חייבת להכיל לפחות 8 תווים"});if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});try{const exists=await sb("app_accounts?select=account_id&email=eq."+encodeURIComponent(email)+"&limit=1");if(exists.length)return res.status(409).json({error:"כבר קיים חשבון עם כתובת האימייל הזו. נסה להתחבר"});const accountId=accountIdForUser({email}),salt=crypto.randomBytes(16).toString("hex"),hash=crypto.scryptSync(password,salt,64).toString("hex"),passwordHash="scrypt$"+salt+"$"+hash;await sb("app_accounts","POST",{account_id:accountId,email,display_name:name,password_hash:passwordHash,auth_provider:"email",is_admin:email===ADMIN_EMAIL,premium_granted:false});const token=crypto.randomBytes(32).toString("hex");await sb("auth_sessions","POST",{token_hash:tokenHash(token),account_id:accountId,expires_at:new Date(Date.now()+2592000000).toISOString()});setSessionCookie(res,token);res.json({ok:true});}catch(error){console.error("Account registration failed",String(error.message||error));res.status(500).json({error:"לא הצלחנו ליצור חשבון כרגע"});}});
-app.post("/api/auth/login",async function(req,res){const email=normalizeEmail(req.body&&req.body.email),password=String(req.body&&req.body.password||"");if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)||!password)return res.status(400).json({error:"יש להזין אימייל וסיסמה תקינים"});if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});try{const rows=await sb("app_accounts?select=account_id,email,display_name,password_hash&email=eq."+encodeURIComponent(email)+"&limit=1");const account=rows[0];if(!account||!account.password_hash)return res.status(401).json({error:"האימייל או הסיסמה שגויים"});const parts=String(account.password_hash).split("$");if(parts.length!==3||parts[0]!=="scrypt")return res.status(401).json({error:"האימייל או הסיסמה שגויים"});const candidate=crypto.scryptSync(password,parts[1],64),stored=Buffer.from(parts[2],"hex");if(stored.length!==candidate.length||!crypto.timingSafeEqual(stored,candidate))return res.status(401).json({error:"האימייל או הסיסמה שגויים"});const token=crypto.randomBytes(32).toString("hex");await sb("auth_sessions","POST",{token_hash:tokenHash(token),account_id:account.account_id,expires_at:new Date(Date.now()+2592000000).toISOString()});setSessionCookie(res,token);res.json({ok:true});}catch(error){console.error("Account login failed",String(error.message||error));res.status(500).json({error:"לא הצלחנו להתחבר כרגע"});}});
+app.post("/api/auth/register",async function(req,res){
+  const name=String(req.body&&req.body.name||"").trim();
+  const email=normalizeEmail(req.body&&req.body.email);
+  const password=String(req.body&&req.body.password||"");
+  if(name.length<2||name.length>80)return res.status(400).json({error:"השם חייב להכיל בין 2 ל־80 תווים"});
+  if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return res.status(400).json({error:"כתובת האימייל לא תקינה"});
+  if(password.length<8||password.length>200)return res.status(400).json({error:"הסיסמה חייבת להכיל בין 8 ל־200 תווים"});
+  if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});
+  let createdAccount=false;
+  let updatedExisting=false;
+  let existingSnapshot=null;
+  let accountId="";
+  try{
+    const exists=await sb("app_accounts?select=account_id,auth_provider,password_hash,display_name&email=eq."+encodeURIComponent(email)+"&limit=1");
+    const salt=crypto.randomBytes(16).toString("hex");
+    const hash=crypto.scryptSync(password,salt,64).toString("hex");
+    const passwordHash="scrypt$"+salt+"$"+hash;
+
+    if(exists.length){
+      const existing=exists[0];
+      accountId=String(existing.account_id||"");
+      if(existing.password_hash){
+        return res.status(409).json({error:"כבר קיים חשבון עם כתובת האימייל הזו. נסה להתחבר"});
+      }
+      existingSnapshot={display_name:existing.display_name,auth_provider:existing.auth_provider,password_hash:existing.password_hash};
+      await sb("app_accounts?account_id=eq."+encodeURIComponent(accountId),"PATCH",{
+        display_name:name,
+        password_hash:passwordHash,
+        auth_provider:"google-and-email",
+        updated_at:new Date().toISOString()
+      });
+      updatedExisting=true;
+    }else{
+      accountId=accountIdForUser({email});
+      await sb("app_accounts","POST",{
+        account_id:accountId,
+        email,
+        display_name:name,
+        password_hash:passwordHash,
+        auth_provider:"email",
+        is_admin:email===ADMIN_EMAIL,
+        premium_granted:false
+      });
+      createdAccount=true;
+    }
+
+    const token=crypto.randomBytes(32).toString("hex");
+    try{
+      await sb("auth_sessions","POST",{
+        token_hash:tokenHash(token),
+        account_id:accountId,
+        expires_at:new Date(Date.now()+2592000000).toISOString()
+      });
+    }catch(sessionError){
+      if(createdAccount){
+        try{await sb("app_accounts?account_id=eq."+encodeURIComponent(accountId),"DELETE");}catch(rollbackError){console.error("Account registration rollback failed",String(rollbackError.message||rollbackError));}
+      }else if(updatedExisting&&existingSnapshot){
+        try{await sb("app_accounts?account_id=eq."+encodeURIComponent(accountId),"PATCH",{
+          display_name:existingSnapshot.display_name,
+          password_hash:existingSnapshot.password_hash,
+          auth_provider:existingSnapshot.auth_provider,
+          updated_at:new Date().toISOString()
+        });}catch(rollbackError){console.error("Existing account password rollback failed",String(rollbackError.message||rollbackError));}
+      }
+      throw sessionError;
+    }
+
+    setSessionCookie(res,token);
+    res.json({ok:true});
+  }catch(error){
+    console.error("Account registration failed",String(error&&error.stack||error));
+    res.status(500).json({error:"לא הצלחנו ליצור חשבון כרגע. נסה שוב בעוד רגע"});
+  }
+});
+app.post("/api/auth/login",async function(req,res){
+  const email=normalizeEmail(req.body&&req.body.email);
+  const password=String(req.body&&req.body.password||"");
+  if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email))return res.status(400).json({error:"כתובת האימייל לא תקינה"});
+  if(!password)return res.status(400).json({error:"יש להזין סיסמה"});
+  if(!supabaseReady())return res.status(503).json({error:"שמירת חשבונות דורשת חיבור למסד הנתונים"});
+  try{
+    const rows=await sb("app_accounts?select=account_id,email,display_name,password_hash,auth_provider&email=eq."+encodeURIComponent(email)+"&limit=1");
+    const account=rows[0];
+    if(!account)return res.status(401).json({error:"לא נמצא חשבון עם כתובת האימייל הזו"});
+    if(!account.password_hash){
+      if(String(account.auth_provider||"")==="google"){
+        return res.status(409).json({error:"החשבון הזה נוצר באמצעות Google. פתח הרשמה עם אותה כתובת כדי להגדיר גם סיסמה, או היכנס באמצעות Google"});
+      }
+      return res.status(401).json({error:"לא הוגדרה סיסמה לחשבון הזה"});
+    }
+    const parts=String(account.password_hash).split("$");
+    if(parts.length!==3||parts[0]!=="scrypt")return res.status(500).json({error:"מבנה הסיסמה בחשבון אינו תקין"});
+    const candidate=crypto.scryptSync(password,parts[1],64);
+    const stored=Buffer.from(parts[2],"hex");
+    if(stored.length!==candidate.length||!crypto.timingSafeEqual(stored,candidate))return res.status(401).json({error:"האימייל או הסיסמה שגויים"});
+    const token=crypto.randomBytes(32).toString("hex");
+    await sb("auth_sessions","POST",{token_hash:tokenHash(token),account_id:account.account_id,expires_at:new Date(Date.now()+2592000000).toISOString()});
+    setSessionCookie(res,token);
+    res.json({ok:true});
+  }catch(error){
+    console.error("Account login failed",String(error&&error.stack||error));
+    res.status(500).json({error:"לא הצלחנו להתחבר כרגע"});
+  }
+});
 app.get("/api/auth/me",async function(req,res){
  try{
    const session=await authSession(req);
