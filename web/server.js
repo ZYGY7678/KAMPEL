@@ -221,6 +221,9 @@ const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const LOCAL_AUDIO_ENGINE_URL = String(process.env.LOCAL_AUDIO_ENGINE_URL || "").replace(/\/+$/, "");
 const LOCAL_AUDIO_ENGINE_TOKEN = String(process.env.LOCAL_AUDIO_ENGINE_TOKEN || "");
 const CHORDINO_ENGINE_TIMEOUT_MS = Math.max(30000, Number(process.env.CHORDINO_ENGINE_TIMEOUT_MS) || 240000);
+const CHORDINO_CHUNK_SECONDS = Math.max(30, Math.min(90, Number(process.env.CHORDINO_CHUNK_SECONDS) || 60));
+const CHORDINO_CHUNK_OVERLAP_SECONDS = Math.max(2, Math.min(8, Number(process.env.CHORDINO_CHUNK_OVERLAP_SECONDS) || 4));
+const CHORDINO_CHUNK_SAMPLE_RATE = Math.max(16000, Math.min(48000, Number(process.env.CHORDINO_CHUNK_SAMPLE_RATE) || 44100));
 const INLINE_AUDIO_MAX_BYTES = 14 * 1024 * 1024; // keep encoded request safely below Gemini audio inline request limit
 const SONG_STORAGE_BUCKET = "chord-studio-songs";
 const SONG_SEARCH_MODEL = "gemini-flash-lite-latest";
@@ -942,6 +945,99 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
   }
 }
 
+
+async function getAudioDurationSeconds(filePath){
+  try{
+    const metadata=await parseFile(filePath,{skipCovers:true});
+    const duration=Number(metadata&&metadata.format&&metadata.format.duration||0);
+    if(Number.isFinite(duration)&&duration>0)return duration;
+  }catch(error){
+    console.warn("Audio duration read failed",String(error&&error.message||error).slice(0,250));
+  }
+  return 0;
+}
+
+async function analyzeChordinoInChunks(filePath,originalName,mimeType,operationIdValue){
+  const totalDuration=await getAudioDurationSeconds(filePath);
+  if(!totalDuration||totalDuration<=CHORDINO_CHUNK_SECONDS){
+    const result=await analyzeWithChordino(filePath,originalName,mimeType,operationIdValue);
+    return {duration:Math.max(totalDuration,Number(result&&result.duration)||0),chords:result&&Array.isArray(result.chords)?result.chords:[],chunkCount:1};
+  }
+
+  const step=Math.max(1,CHORDINO_CHUNK_SECONDS-CHORDINO_CHUNK_OVERLAP_SECONDS);
+  const chunkPlans=[];
+  for(let coreStart=0;coreStart<totalDuration;coreStart+=step){
+    const coreEnd=Math.min(totalDuration,coreStart+step);
+    const inputStart=Math.max(0,coreStart-CHORDINO_CHUNK_OVERLAP_SECONDS);
+    const inputEnd=Math.min(totalDuration,coreEnd+CHORDINO_CHUNK_OVERLAP_SECONDS);
+    chunkPlans.push({index:chunkPlans.length,coreStart,coreEnd,inputStart,inputEnd});
+    if(coreEnd>=totalDuration-0.001)break;
+  }
+
+  const merged=[];
+  logOperation(operationIdValue,"chordino_chunking_started","האודיו חולק ל-"+chunkPlans.length+" מקטעים של "+CHORDINO_CHUNK_SECONDS+" שניות עם חפיפה של "+CHORDINO_CHUNK_OVERLAP_SECONDS+" שניות לסנכרון");
+
+  for(const plan of chunkPlans){
+    const chunkPath=path.join(uploadDir,"chordino-"+operationIdValue+"-"+plan.index+"-"+crypto.randomBytes(5).toString("hex")+".wav");
+    try{
+      const seconds=Math.max(0.1,plan.inputEnd-plan.inputStart);
+      logOperation(operationIdValue,"chordino_chunk_started","מקטע "+(plan.index+1)+"/"+chunkPlans.length+" · זמן "+plan.inputStart.toFixed(2)+"–"+plan.inputEnd.toFixed(2)+" שניות");
+      await execFileAsync(ffmpegPath,[
+        "-y","-hide_banner","-loglevel","error",
+        "-ss",String(plan.inputStart),
+        "-i",filePath,
+        "-t",String(seconds),
+        "-vn",
+        "-ar",String(CHORDINO_CHUNK_SAMPLE_RATE),
+        "-ac","1",
+        "-c:a","pcm_s16le",
+        chunkPath
+      ],{maxBuffer:4*1024*1024});
+
+      const chunkName=(String(originalName||"audio")+".chunk"+plan.index+".wav");
+      const chunkResult=await analyzeWithChordino(chunkPath,chunkName,"audio/wav",operationIdValue);
+      const localDuration=Math.max(0,Number(chunkResult&&chunkResult.duration)||seconds);
+      const shifted=(Array.isArray(chunkResult&&chunkResult.chords)?chunkResult.chords:[]).map(function(chord){
+        return {
+          start:Math.max(0,Number(chord&&chord.start||0)+plan.inputStart),
+          end:Math.min(totalDuration,Number(chord&&chord.end||0)+plan.inputStart),
+          chord:String(chord&&chord.chord||"").trim(),
+          confidence:Math.max(0,Math.min(1,Number(chord&&chord.confidence)||0.8)),
+          chunk:plan.index
+        };
+      }).filter(function(chord){
+        return chord.chord&&chord.end>chord.start;
+      });
+
+      const coreEvents=shifted.filter(function(chord){
+        return chord.start>=plan.coreStart-0.02 && chord.start<plan.coreEnd-0.02;
+      });
+      merged.push.apply(merged,coreEvents);
+      logOperation(operationIdValue,"chordino_chunk_completed","מקטע "+(plan.index+1)+"/"+chunkPlans.length+" הושלם · "+coreEvents.length+" אירועי אקורד נשמרו · משך מנוע "+localDuration.toFixed(2)+" שניות");
+    }catch(error){
+      logOperation(operationIdValue,"chordino_chunk_failed","מקטע "+(plan.index+1)+"/"+chunkPlans.length+" נכשל: "+String(error&&error.message||error).slice(0,350),"error");
+      throw error;
+    }finally{
+      try{await fs.unlink(chunkPath);}catch{}
+    }
+  }
+
+  const chords=collapseAdjacentChordEvents(merged,0.35)
+    .map(function(chord){
+      return {
+        start:Math.max(0,Math.min(totalDuration,Number(chord.start)||0)),
+        end:Math.max(0,Math.min(totalDuration,Number(chord.end)||0)),
+        chord:String(chord.chord||"").trim(),
+        confidence:Math.max(0,Math.min(1,Number(chord.confidence)||0.8))
+      };
+    })
+    .filter(function(chord){return chord.chord&&chord.end>chord.start;});
+
+  if(!chords.length)throw new Error("Chordino המפוצל לא החזיר אירועי אקורד");
+  logOperation(operationIdValue,"chordino_chunking_completed","כל המקטעים סונכרנו לציר הזמן המקורי: "+chords.length+" אירועי אקורד על פני "+totalDuration.toFixed(2)+" שניות");
+  return {duration:totalDuration,chords:chords,chunkCount:chunkPlans.length};
+}
+
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
  const startedAt=Date.now(),maxRetries=10,retryDelayMs=60000;
  let activeModel=MODEL,usedFallback=false;
@@ -1056,10 +1152,10 @@ app.post("/api/analyze",async function(req,res){
     logOperation(req.operationId,"metadata_completed","חילוץ פרטי האודיו הסתיים; "+(audioMetadata?"נמצאו פרטים":"לא נמצאו פרטים מוטמעים"));
 
     currentStage="evidence_collection";
-    logOperation(req.operationId,"evidence_collection_started","מריצים במקביל תמלול Gemini וניתוח אקורדים עצמאי של Chordino");
+    logOperation(req.operationId,"evidence_collection_started","מריצים תמלול Gemini מלא ובמקביל Chordino מחולק למקטעים עם חפיפה וסנכרון לציר הזמן המקורי");
     const evidence=await Promise.all([
       transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
-      analyzeWithChordino(req.file.path,filenameHintValue,mimeType,req.operationId)
+      analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId)
     ]);
     const transcript=evidence[0];
     const chordino=evidence[1];
@@ -1079,14 +1175,22 @@ app.post("/api/analyze",async function(req,res){
     if(!(finalAnalysis.lines||[]).length)throw new Error("הניתוח הסופי של Gemini לא החזיר תמלול");
     // Chordino is the authoritative chord detector. Gemini contributes lyrics,
     // metadata and key context only; never replace the detected chord timeline.
-    finalAnalysis.chords=quantizeChordsToFourBeats(collapseAdjacentChordEvents(chordino.chords,0.9).map(function(chord){
-      return {start:Math.max(0,Number(chord.start)||0),end:Math.max(0,Number(chord.end)||0),chord:String(chord.chord||"").trim(),confidence:0.8};
-    }).filter(function(chord){return chord.chord&&chord.end>chord.start;}),finalAnalysis.bpm,finalAnalysis.duration);
+    // Preserve the real Chordino timestamps. Do NOT quantize from song start to BPM bars:
+    // that introduces cumulative timing drift when a recording changes tempo or breathes naturally.
+    finalAnalysis.duration=chordino.duration>0?chordino.duration:finalAnalysis.duration;
+    finalAnalysis.chords=collapseAdjacentChordEvents(chordino.chords,0.35).map(function(chord){
+      return {
+        start:Math.max(0,Number(chord.start)||0),
+        end:Math.min(finalAnalysis.duration||Infinity,Math.max(0,Number(chord.end)||0)),
+        chord:String(chord.chord||"").trim(),
+        confidence:Math.max(0,Math.min(1,Number(chord.confidence)||0.8))
+      };
+    }).filter(function(chord){return chord.chord&&chord.end>chord.start;});
     // Put each detected chord above the first suitable lyric word only.
     // Never repeat the same sustained chord above every following word.
     placeChordAnchors(finalAnalysis.lines,finalAnalysis.chords);
     if(!finalAnalysis.chords.length)throw new Error("Chordino לא סיפק ציר אקורדים תקין");
-    logOperation(req.operationId,"final_reconciliation_completed","התמלול והמטא-נתונים הושלמו; ציר האקורדים הסופי נלקח ישירות מ-Chordino: "+(finalAnalysis.lines||[]).length+" שורות, "+finalAnalysis.chords.length+" אקורדים");
+    logOperation(req.operationId,"final_reconciliation_completed","התמלול והמטא-נתונים הושלמו; ציר האקורדים הסופי נלקח מ-Chordino המפוצל והמסונכרן: "+(chordino.chunkCount||1)+" מקטעים, "+(finalAnalysis.lines||[]).length+" שורות, "+finalAnalysis.chords.length+" אקורדים");
 
     currentStage="history_save";
     let historyId="",savedAudioPath="";
