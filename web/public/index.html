@@ -162,7 +162,7 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
     <nav class="side-menu-nav">
       <button type="button" class="side-menu-item" onclick="openMySongs();closeSideMenu()"><span>🎵</span><div><b>שירים שלי</b><small>השירים והניתוחים שנשמרו</small></div></button>
       <button type="button" class="side-menu-item" onclick="openSideSection('api')"><span>🔑</span><div><b>הזנת מפתח API</b><small>ניהול מפתח Gemini האישי</small></div></button>
-      <button type="button" class="side-menu-item" onclick="openSideSection('premium')"><span>⭐</span><div><b>שדרוג ל־Premium</b><small>מצב החשבון ואפשרויות השדרוג</small></div></button>
+      <button type="button" class="side-menu-item" onclick="openSideSection('premium')"><span id="sidePremiumMenuIcon">⭐</span><div><b id="sidePremiumMenuLabel">שדרוג ל־Premium</b><small id="sidePremiumMenuHint">מצב החשבון ואפשרויות השדרוג</small></div></button>
       <button id="developerMessageMenuItem" type="button" class="side-menu-item" onclick="openDeveloperMessage('contact');closeSideMenu()"><span>💬</span><div><b>הודעה למפתח</b><small>שלח הודעה ישירות למפתח</small></div></button>
       <button id="adminMessagesMenuItem" type="button" class="side-menu-item hidden" onclick="openSideSection('admin')"><span>📨</span><div><b>הודעות שנשלחו</b><small>צפייה בהודעות המשתמשים</small></div></button>
       <button id="adminMenuItem" type="button" class="side-menu-item hidden" onclick="openSideSection('admin')"><span>🛠️</span><div><b>גישת מנהל</b><small>ניהול Premium ויומן ניתוחים</small></div></button>
@@ -577,6 +577,7 @@ function updateUploadGate(){
   var apiPanel=document.getElementById("apiAccessPanel");if(apiPanel)apiPanel.classList.remove("hidden");
   var adminPanel=document.getElementById("adminPanel"),adminMenu=document.getElementById("adminMenuItem");if(adminPanel)adminPanel.classList.toggle("hidden",!accountState.isAdmin);if(adminMenu)adminMenu.classList.toggle("hidden",!accountState.isAdmin);
   var status=document.getElementById("accountAccessStatus");if(status)status.textContent=accountState.authenticated?(currentApiKey()?"חשבון מחובר · מפתח API שמור":"חשבון מחובר · צריך להזין מפתח API"):"התחבר כדי להתחיל";
+  var premiumMenuLabel=document.getElementById("sidePremiumMenuLabel"),premiumMenuIcon=document.getElementById("sidePremiumMenuIcon"),premiumMenuHint=document.getElementById("sidePremiumMenuHint");if(premiumMenuLabel)premiumMenuLabel.textContent=accountState.premium?"הנך פרימיום":"שדרוג ל־Premium";if(premiumMenuIcon)premiumMenuIcon.textContent=accountState.premium?"👑":"⭐";if(premiumMenuHint)premiumMenuHint.textContent=accountState.premium?"כל תכונות הפרימיום פעילות בחשבונך":"מצב החשבון ואפשרויות השדרוג";
   var badge=document.getElementById("planBadge"),desc=document.getElementById("planDescription"),daily=document.getElementById("dailyStatus"),upgrade=document.getElementById("upgradeBtn"),refresh=document.getElementById("refreshPlanBtn"),paymentNote=document.getElementById("paymentNote"),offerEl=document.getElementById("premiumOffer");
   if(badge){badge.textContent=accountState.premium?"Premium":"מצב רגיל";badge.classList.toggle("premium",Boolean(accountState.premium));}
   if(desc)desc.textContent=accountState.premium?"כל התכונות פתוחות תמיד, כולל ניתוח ללא מגבלת שירים והפרדת קול הזמר.":"שיר אחד בכל שבוע. הפרדת קול הזמר זמינה ב־Premium.";
