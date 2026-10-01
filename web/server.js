@@ -216,7 +216,7 @@ const upload = multer({
   limits: { fileSize: 200 * 1024 * 1024 }
 });
 
-const MODEL = "gemini-3.8-flash";
+const MODEL = "gemini-flash-lite-latest";
 const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const LOCAL_AUDIO_ENGINE_URL = String(process.env.LOCAL_AUDIO_ENGINE_URL || "").replace(/\/+$/, "");
 const LOCAL_AUDIO_ENGINE_TOKEN = String(process.env.LOCAL_AUDIO_ENGINE_TOKEN || "");
@@ -1185,7 +1185,7 @@ async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdV
    let parsed;try{parsed=JSON.parse(outputText);}catch(parseError){const e=new Error("Gemini החזיר תוכן שאינו JSON תקין: "+String(parseError.message||parseError).slice(0,180));e.geminiStatus=response.status;e.geminiCode="INVALID_MODEL_JSON";throw e;}
    logOperation(operationIdValue,"gemini_response_received","Gemini החזיר תשובה תקינה; שלב "+stage+", מודל "+activeModel+(usedFallback?" (מודל גיבוי)":"")+", HTTP "+response.status+", ניסיון "+(attempt+1)+", משך "+(Date.now()-startedAt)+"ms");return parsed;
   }catch(error){
-   if(!usedFallback&&activeModel===MODEL){usedFallback=true;activeModel="gemini-flash-lite-latest";attempt=-1;logOperation(operationIdValue,"gemini_fallback","מודל "+MODEL+" נכשל בשלב "+stage+"; מעבר אוטומטי למודל הגיבוי gemini-flash-lite-latest. פירוט: "+String(error&&error.message||error).slice(0,250),"warning");continue;}
+   if(!usedFallback&&activeModel===MODEL){usedFallback=true;activeModel="gemini-3.8-flash";attempt=-1;logOperation(operationIdValue,"gemini_fallback","מודל ברירת המחדל "+MODEL+" נכשל בשלב "+stage+"; מעבר אוטומטי למודל הגיבוי gemini-3.8-flash. פירוט: "+String(error&&error.message||error).slice(0,250),"warning");continue;}
    const overload=Number(error&&error.geminiStatus)===429||Number(error&&error.geminiStatus)===503||/RESOURCE_EXHAUSTED|UNAVAILABLE|overload|overloaded|high demand|rate.?limit/i.test(String(error&&error.geminiCode||"")+" "+String(error&&error.message||""));
    if(overload&&attempt<maxRetries){logOperation(operationIdValue,"gemini_overload_retry","מודל הגיבוי עמוס או הגביל בקשות; ניסיון "+(attempt+1)+" נכשל. ניסיון חוזר "+(attempt+2)+" מתוך "+(maxRetries+1)+" בעוד דקה","warning");await new Promise(function(resolve){setTimeout(resolve,retryDelayMs);});continue;}
    const message=error&&error.name==="AbortError"?"הבקשה ל־Gemini חרגה ממגבלת הזמן":"בקשת Gemini נכשלה";
@@ -1293,7 +1293,7 @@ app.post("/api/analyze",async function(req,res){
     if(!Array.isArray(chordino.chords)||!chordino.chords.length)throw new Error("Chordino לא סיפק נתוני אקורדים");
 
     currentStage="final_reconciliation";
-    logOperation(req.operationId,"final_reconciliation_started","שולחים ל-Gemini 3.8 Flash את התמלול ואת ציר האקורדים של Chordino כדי לסגור את התוצאה הסופית");
+    logOperation(req.operationId,"final_reconciliation_started","שולחים ל-Gemini Flash Lite את התמלול ואת ציר האקורדים של Chordino כדי לסגור את התוצאה הסופית");
     const reconciliationPrompt=PRIMARY_PROMPT+
       metadataPromptBlock(filenameHintValue,audioMetadata)+
       "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n"+
@@ -1662,7 +1662,7 @@ app.post("/api/export/docx", async function(req, res) {
 
     children.push(new Paragraph({
       alignment: AlignmentType.RIGHT,
-      children: [new TextRun({ text: "נוצר באמצעות Chord Studio · Gemini 3.8 Flash", font: "Arial", size: 10, color: "8493A4" })]
+      children: [new TextRun({ text: "נוצר באמצעות Chord Studio · Gemini Flash Lite", font: "Arial", size: 10, color: "8493A4" })]
     }));
 
     const doc = new Document({
@@ -1764,7 +1764,7 @@ async function runSelfTest(id) {
       const chordino = await analyzeWithChordino(sourcePath, filename, "audio/ogg", id);
       state.checks.chordino = { ok: Array.isArray(chordino.chords) && chordino.chords.length > 0, events: chordino.chords.length, duration: chordino.duration };
 
-      setStage("reconciliation", "Gemini 3.8 Flash משלב תמלול + Chordino");
+      setStage("reconciliation", "Gemini Flash Lite משלב תמלול + Chordino");
       const reconciliationPrompt = PRIMARY_PROMPT +
         metadataPromptBlock(filename, audioMetadata) +
         "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n" +
@@ -1779,7 +1779,7 @@ async function runSelfTest(id) {
       }
       state.checks.reconciliation = { ok: true, lines: first.lines.length, chords: first.chords.length, timelineValid: selfTestTimelineValid(first) };
 
-      setStage("verification", "Gemini 3.8 Flash מאמת מחדש את התוצאה");
+      setStage("verification", "Gemini Flash Lite מאמת מחדש את התוצאה");
       const verifyPrompt = VERIFY_PREFIX + metadataPromptBlock(filename, audioMetadata) + "\nCandidate JSON:\n" + JSON.stringify(first);
       const verified = cleanAnalysis(await analyzeWithGemini(apiKey, audioBase64, mimeType, verifyPrompt, id, "analysis_verify"));
       alignFinalWordTimes(verified.lines,transcriptionEvidence.words||[],Number(verified.duration)||Number(chordino.duration)||0);
