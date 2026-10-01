@@ -1754,8 +1754,9 @@ async function runSelfTest(id) {
     state.mimeType = mimeType;
 
     setStage("transcription", "Gemini 3.5 Transcribe");
-    const transcript = await transcribeWithGemini(apiKey, audioBase64, mimeType, id);
-    state.checks.transcription = { ok: Boolean(transcript && transcript.trim()), chars: String(transcript || "").length };
+    const transcriptionEvidence = await transcribeWithGemini(apiKey, audioBase64, mimeType, id);
+    const transcript = String(transcriptionEvidence&&transcriptionEvidence.text||"").trim();
+    state.checks.transcription = { ok: Boolean(transcript), chars: transcript.length, timestampedWords: (transcriptionEvidence.words||[]).length };
 
     setStage("chordino", "Sonic Annotator + Chordino");
     try {
@@ -1768,6 +1769,8 @@ async function runSelfTest(id) {
         metadataPromptBlock(filename, audioMetadata) +
         "\n\nGEMINI 3.5 TRANSCRIBE — COMPLETE TRANSCRIPTION EVIDENCE:\n" +
         transcript +
+        "\n\nGEMINI 3.5 TRANSCRIBE — WORD TIMESTAMP EVIDENCE:\n" +
+        JSON.stringify(transcriptionEvidence.words||[]) +
         "\n\nCHORDINO — INDEPENDENT CHORD TIMELINE EVIDENCE:\n" +
         JSON.stringify({ source: "Chordino via Sonic Annotator", duration: chordino.duration, chords: chordino.chords });
       const first = cleanAnalysis(await analyzeWithGemini(apiKey, audioBase64, mimeType, reconciliationPrompt, id, "final_reconciliation"));
