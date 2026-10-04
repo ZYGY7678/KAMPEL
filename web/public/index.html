@@ -316,7 +316,7 @@ body.theme-day .search-form input,body.theme-day .search-form textarea{backgroun
 <div class="card ready">
 <div class="drop-icon">♫</div>
 <div class="ready-meta"><label>קובץ נבחר</label><h2 id="fileName"></h2><p id="fileInfo"></p></div>
-<div class="ready-actions"><button class="primary" onclick="analyze()">↻ נסה שוב</button><button class="ghost" onclick="goHome()">החלף קובץ</button></div>
+<div class="field" style="margin:14px 0"><label for="chordEngineSelect">מנוע זיהוי אקורדים</label><select id="chordEngineSelect" class="input"><option value="chordino" selected>Chordino (ברירת מחדל)</option><option value="librosa">Python + Librosa (ניסיוני)</option></select><small>אפשר להחליף מנוע בכל ניתוח. Chordino נשאר זמין.</small></div><div class="ready-actions"><button class="primary" onclick="analyze()">↻ נסה שוב</button><button class="ghost" onclick="goHome()">החלף קובץ</button></div>
 </div>
 <div id="readyError" class="error hidden"></div>
 </div>
