@@ -217,6 +217,11 @@ def health_payload() -> dict:
     }
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    return {"ok": True, "engine": "sonic-annotator+chordino"}
+
+
 @app.get("/health")
 def health():
     return health_payload()
