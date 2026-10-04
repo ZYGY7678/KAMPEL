@@ -1224,9 +1224,6 @@ async function analyzeChordinoInChunks(filePath,originalName,mimeType,operationI
   return {duration:duration,chords:chords,chunkCount:1};
 }
 
-const LIBROSA_ENGINE_URL=String(process.env.LIBROSA_ENGINE_URL||"").replace(/\/+$/,"");
-const LIBROSA_ENGINE_TOKEN=String(process.env.LIBROSA_ENGINE_TOKEN||"");
-async function analyzeWithLibrosa(filePath,originalName,mimeType,operationIdValue){if(!LIBROSA_ENGINE_URL||!LIBROSA_ENGINE_TOKEN)throw new Error("Librosa engine is not configured");const bytes=await fs.readFile(filePath);const form=new FormData();form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio.mp3"));const response=await fetch(LIBROSA_ENGINE_URL+"/analyze",{method:"POST",headers:{Authorization:"Bearer "+LIBROSA_ENGINE_TOKEN},body:form,signal:AbortSignal.timeout(300000)});const raw=await response.text();let data;try{data=JSON.parse(raw)}catch(e){throw new Error("Librosa returned non-JSON response (HTTP "+response.status+")")}if(!response.ok)throw new Error(String(data.error||"Librosa failed")+" (HTTP "+response.status+")");const chords=(Array.isArray(data.chords)?data.chords:[]).map(c=>({start:Number(c.start)||0,end:Number(c.end)||0,chord:String(c.chord||""),confidence:Number(c.confidence)||0})).filter(c=>c.chord&&c.end>c.start).sort((a,b)=>a.start-b.start);if(!chords.length)throw new Error("Librosa returned no chords");logOperation(operationIdValue,"librosa_completed","Librosa returned "+chords.length+" chord events");return {duration:Number(data.duration)||0,chords};}
 async function analyzeWithGemini(apiKey,audioBase64,mimeType,prompt,operationIdValue,stage){
  const startedAt=Date.now(),maxRetries=10,retryDelayMs=60000;
  let activeModel=MODEL,usedFallback=false;
@@ -1362,10 +1359,9 @@ app.post("/api/analyze",async function(req,res){
 
     currentStage="evidence_collection";
     logOperation(req.operationId,"evidence_collection_started","מריצים תמלול Gemini מלא ובמקביל Chordino על כל השיר בבקשה אחת, ללא חלוקה למקטעים");
-    const chordEngine=String(req.body&&req.body.chordEngine||"chordino").toLowerCase()==="librosa"?"librosa":"chordino";
     const evidence=await Promise.all([
       transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
-      chordEngine==="librosa" ? analyzeWithLibrosa(req.file.path,filenameHintValue,mimeType,req.operationId) : analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId)
+      analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId)
     ]);
     const transcriptionEvidence=evidence[0];
     const transcript=String(transcriptionEvidence&&transcriptionEvidence.text||"").trim();
