@@ -1125,36 +1125,83 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
     logOperation(operationIdValue,"chordino_not_configured",error.message,"error");
     throw error;
   }
-  const startedAt=Date.now(),controller=new AbortController();
+
+  const startedAt=Date.now();
+  const controller=new AbortController();
   const timeout=setTimeout(function(){controller.abort();},CHORDINO_ENGINE_TIMEOUT_MS);
-  try{
-    logOperation(operationIdValue,"chordino_started","שולחים את האודיו למנוע Sonic Annotator + Chordino");
-    const bytes=await fs.readFile(filePath);
-    let response;
-    try{
-      const form=new FormData();
-      form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
-      response=await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
-        method:"POST",
-        headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
-        body:form,
-        signal:controller.signal
-      });
-    }catch(error){
-      throw error;
+
+  async function waitForChordinoReady(){
+    const maxAttempts=12;
+    const healthTimeoutMs=10000;
+    for(let attempt=1;attempt<=maxAttempts;attempt++){
+      try{
+        const healthResponse=await fetch(LOCAL_AUDIO_ENGINE_URL+"/health",{
+          method:"GET",
+          signal:AbortSignal.timeout(healthTimeoutMs),
+          cache:"no-store"
+        });
+        if(healthResponse.ok){
+          logOperation(operationIdValue,"chordino_wakeup_ready","שירות Chordino זמין; ממשיכים לניתוח");
+          return true;
+        }
+        logOperation(operationIdValue,"chordino_wakeup_retry","שירות Chordino עדיין לא מוכן (HTTP "+healthResponse.status+"); ניסיון "+attempt+" מתוך "+maxAttempts+" בעוד 5 שניות","warning");
+      }catch(error){
+        logOperation(operationIdValue,"chordino_wakeup_retry","לא ניתן להגיע לשירות Chordino עדיין ("+String(error&&error.message||error).slice(0,180)+"); ניסיון "+attempt+" מתוך "+maxAttempts+" בעוד 5 שניות","warning");
+      }
+      if(attempt<maxAttempts)await new Promise(function(resolve){setTimeout(resolve,5000);});
     }
-    const raw=await response.text();let data={};
+    const error=new Error("שירות Chordino לא התעורר בזמן לאחר בדיקת זמינות ייעודית");
+    error.code="CHORDINO_WAKEUP_TIMEOUT";
+    throw error;
+  }
+
+  async function postAnalysis(bytes){
+    const form=new FormData();
+    form.append("audio",new Blob([bytes],{type:mimeType||"audio/mpeg"}),String(originalName||"audio"));
+    return await fetch(LOCAL_AUDIO_ENGINE_URL+"/analyze",{
+      method:"POST",
+      headers:{Authorization:"Bearer "+LOCAL_AUDIO_ENGINE_TOKEN},
+      body:form,
+      signal:controller.signal
+    });
+  }
+
+  try{
+    logOperation(operationIdValue,"chordino_started","בודקים תחילה שהשירות החינמי של Chordino ער לפני שליחת האודיו");
+    await waitForChordinoReady();
+
+    const bytes=await fs.readFile(filePath);
+    let response=await postAnalysis(bytes);
+
+    const isRenderGatewayFailure=function(response){
+      const contentType=String(response.headers.get("content-type")||"").toLowerCase();
+      return (response.status===502||response.status===503||response.status===504) &&
+        (contentType.includes("text/html")||contentType.includes("text/plain")||contentType==="");
+    };
+
+    if(isRenderGatewayFailure(response)){
+      logOperation(operationIdValue,"chordino_gateway_retry","Chordino היה זמין בבדיקת health אבל שער Render החזיר "+response.status+" בזמן שליחת האודיו; מבצעים חימום נוסף וניסיון אחד בלבד","warning");
+      await waitForChordinoReady();
+      response=await postAnalysis(bytes);
+    }
+
+    const raw=await response.text();
+    let data={};
     try{data=raw?JSON.parse(raw):{};}catch(parseError){
       const contentType=String(response.headers.get("content-type")||"לא צוין");
       const preview=String(raw||"").replace(/\\s+/g," ").slice(0,240);
       const error=new Error("שירות Chordino החזיר גוף שאינו JSON; HTTP "+response.status+"; Content-Type: "+contentType+"; תשובה: "+(preview||"[ריק]"));
-      error.chordinoStatus=response.status;error.code="CHORDINO_INVALID_RESPONSE";throw error;
+      error.chordinoStatus=response.status;
+      error.code="CHORDINO_INVALID_RESPONSE";
+      throw error;
     }
     if(!response.ok){
       const detail=data&&data.detail||data&&data.error||"שירות Chordino נכשל";
       const error=new Error(String(detail)+" (HTTP "+response.status+")");
-      error.chordinoStatus=response.status;throw error;
+      error.chordinoStatus=response.status;
+      throw error;
     }
+
     const rawChords=Array.isArray(data.chords)?data.chords.map(function(chord){
       return {
         start:Math.max(0,Number(chord&&chord.start)||0),
@@ -1164,11 +1211,14 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
     }).filter(function(chord){
       return chord.chord&&chord.end>chord.start;
     }).sort(function(a,b){return a.start-b.start;}) : [];
+
     const chords=collapseAdjacentChordEvents(rawChords,0.9);
     if(!chords.length){
       const error=new Error("Chordino לא החזיר אף אירוע אקורד לקובץ.");
-      error.code="EMPTY_CHORDINO";throw error;
+      error.code="EMPTY_CHORDINO";
+      throw error;
     }
+
     logOperation(operationIdValue,"chordino_completed","Chordino החזיר "+chords.length+" אירועי אקורד; משך "+(Date.now()-startedAt)+"ms");
     return {
       engine:String(data.engine||"sonic-annotator+chordino"),
@@ -1183,7 +1233,6 @@ async function analyzeWithChordino(filePath,originalName,mimeType,operationIdVal
     clearTimeout(timeout);
   }
 }
-
 
 async function getAudioDurationSeconds(filePath){
   try{
