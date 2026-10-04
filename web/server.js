@@ -1350,18 +1350,7 @@ app.post("/api/analyze",async function(req,res){
     const chordEngine=String(req.body&&req.body.chordEngine||"chordino").toLowerCase()==="librosa"?"librosa":"chordino";
     const evidence=await Promise.all([
       transcribeWithGemini(req.auth.apiKey,audioBase64,mimeType,req.operationId),
-      (async function(){
-        if(chordEngine==="librosa") return analyzeWithLibrosa(req.file.path,filenameHintValue,mimeType,req.operationId);
-        try {
-          return await analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId);
-        } catch(chordinoError) {
-          logOperation(req.operationId,"chordino_fallback_started","Chordino נכשל; עוברים אוטומטית למנוע Librosa כדי לא להפיל את הניתוח: "+String(chordinoError&&chordinoError.message||chordinoError).slice(0,220),"warning");
-          const fallback=await analyzeWithLibrosa(req.file.path,filenameHintValue,mimeType,req.operationId);
-          fallback.engine="librosa_fallback";
-          logOperation(req.operationId,"chordino_fallback_completed","Librosa השלים את זיהוי האקורדים לאחר כשל Chordino");
-          return fallback;
-        }
-      })()
+      chordEngine==="librosa" ? analyzeWithLibrosa(req.file.path,filenameHintValue,mimeType,req.operationId) : analyzeChordinoInChunks(req.file.path,filenameHintValue,mimeType,req.operationId)
     ]);
     const transcriptionEvidence=evidence[0];
     const transcript=String(transcriptionEvidence&&transcriptionEvidence.text||"").trim();
