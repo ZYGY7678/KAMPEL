@@ -222,6 +222,11 @@ def root():
     return {"ok": True, "engine": "sonic-annotator+chordino"}
 
 
+@app.head("/", include_in_schema=False)
+def root_head():
+    return None
+
+
 @app.get("/health")
 def health():
     return health_payload()
