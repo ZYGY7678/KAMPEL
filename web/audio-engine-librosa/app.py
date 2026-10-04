@@ -28,7 +28,7 @@ def detect(path):
     chroma/=np.maximum(np.linalg.norm(chroma,axis=0,keepdims=True),1e-8)
     scores=TEMPLATES@chroma
     best=np.argmax(scores,axis=0)
-    best=median_filter(best.astype(np.int32),size= nine if len(best)>=9 else 3,mode="nearest")
+    best=median_filter(best.astype(np.int32),size=9 if len(best)>=9 else 3,mode="nearest")
     times=librosa.frames_to_time(np.arange(len(best)),sr=sr,hop_length=HOP)
     out=[]; start=0
     for i in range(1,len(best)+1):
