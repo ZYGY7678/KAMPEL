@@ -5,9 +5,21 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
+concurrency:
+  group: chordino-keepalive
+  cancel-in-progress: true
+
 jobs:
   ping-chordino:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
-      - name: Keep Chordino awake
-        run: curl --fail --silent --show-error --max-time 20 https://chord-studio-local-engine-chordino.onrender.com/health
+      - name: Wake Chordino
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 15 \
+            --max-time 90 \
+            --retry 4 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            "https://chord-studio-local-engine-chordino.onrender.com/health"
