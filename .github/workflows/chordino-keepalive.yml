@@ -4,24 +4,40 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
+# Do not cancel an already-running keepalive: each run intentionally covers
+# multiple hours so GitHub scheduler delays do not leave Chordino asleep.
 concurrency:
-  group: chordino-keepalive
-  cancel-in-progress: true
+  group: chordino-keepalive-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
-  ping-chordino:
+  keep-chordino-awake:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 170
     steps:
-      - name: Wake Chordino
+      - name: Keep Chordino warm
+        shell: bash
         run: |
-          curl --fail-with-body --silent --show-error \
-            --connect-timeout 15 \
-            --max-time 90 \
-            --retry 4 \
-            --retry-delay 5 \
-            --retry-all-errors \
-            "https://chord-studio-local-engine-chordino.onrender.com/health"
+          set -u
+          end_at=$((SECONDS + 150 * 60))
+
+          ping_chordino() {
+            echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] Pinging Chordino"
+            curl --fail-with-body --silent --show-error \
+              --connect-timeout 15 \
+              --max-time 90 \
+              --retry 5 \
+              --retry-delay 5 \
+              --retry-all-errors \
+              "https://chord-studio-local-engine-chordino.onrender.com/health"
+          }
+
+          while [ "$SECONDS" -lt "$end_at" ]; do
+            if ! ping_chordino; then
+              echo "Health ping failed; continuing so the next ping can recover it." >&2
+            fi
+            sleep 240
+          done
