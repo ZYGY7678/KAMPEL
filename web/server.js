@@ -215,7 +215,7 @@ const MODEL = "gemini-flash-lite-latest";
 const TRANSCRIBE_MODEL = "gemini-3.5-transcribe";
 const LOCAL_AUDIO_ENGINE_URL = String(process.env.LOCAL_AUDIO_ENGINE_URL || "").replace(/\/+$/, "");
 const LOCAL_AUDIO_ENGINE_TOKEN = String(process.env.LOCAL_AUDIO_ENGINE_TOKEN || "");
-const CHORDINO_ENGINE_TIMEOUT_MS = Math.max(30000, Number(process.env.CHORDINO_ENGINE_TIMEOUT_MS) || 240000);
+const CHORDINO_ENGINE_TIMEOUT_MS = Math.max(30000, Number(process.env.CHORDINO_ENGINE_TIMEOUT_MS) || 360000);
 const CHORDINO_CHUNK_SECONDS = Math.max(20, Math.min(20, Number(process.env.CHORDINO_CHUNK_SECONDS) || 20));
 const CHORDINO_CHUNK_OVERLAP_SECONDS = Math.max(4, Math.min(5, Number(process.env.CHORDINO_CHUNK_OVERLAP_SECONDS) || 5));
 const CHORDINO_CHUNK_SAMPLE_RATE = Math.max(16000, Math.min(48000, Number(process.env.CHORDINO_CHUNK_SAMPLE_RATE) || 44100));
@@ -1133,7 +1133,7 @@ async function transcribeWithGemini(apiKey,audioBase64,mimeType,operationIdValue
 }
 async function waitForChordino(operationIdValue, overallSignal){
   const warmupStarted=Date.now();
-  const warmupLimitMs=Math.min(90000,Math.max(30000,CHORDINO_ENGINE_TIMEOUT_MS-5000));
+  const warmupLimitMs=Math.min(180000,Math.max(60000,CHORDINO_ENGINE_TIMEOUT_MS-10000));
   logOperation(operationIdValue,"chordino_warmup_started","מעירים את שירות Chordino לפני שליחת האודיו; זה מתבצע במקביל לתמלול כדי למנוע 502 של Render בשירות רדום");
   const deadline=Date.now()+warmupLimitMs;
   let attempt=0;
